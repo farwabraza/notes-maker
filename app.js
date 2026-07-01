@@ -9,22 +9,78 @@
     (s == null ? "" : String(s)).replace(/[&<>"]/g, (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])
     );
-  const LS = {
-    get(k, d) { try { return JSON.parse(localStorage.getItem("ward:" + k)) ?? d; } catch { return d; } },
-    set(k, v) { try { localStorage.setItem("ward:" + k, JSON.stringify(v)); } catch {} },
-    del(k) { localStorage.removeItem("ward:" + k); },
-  };
+  // ---- IndexedDB store: no ~5MB localStorage cap; limited only by disk ----
+  const DB = (function () {
+    const NAME = "ward-db", STORE = "kv", VER = 1;
+    let dbp = null;
+    function open() {
+      if (dbp) return dbp;
+      dbp = new Promise((res, rej) => {
+        if (!("indexedDB" in window)) return rej(new Error("no-idb"));
+        const r = indexedDB.open(NAME, VER);
+        r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains(STORE)) r.result.createObjectStore(STORE); };
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+      });
+      return dbp;
+    }
+    function tx(mode, fn) {
+      return open().then((db) => new Promise((res, rej) => {
+        const t = db.transaction(STORE, mode), s = t.objectStore(STORE);
+        const out = fn(s);
+        t.oncomplete = () => res(out && out.result !== undefined ? out.result : out);
+        t.onerror = () => rej(t.error);
+      }));
+    }
+    return {
+      get(k) { return tx("readonly", (s) => s.get("ward:" + k)).catch(() => undefined); },
+      set(k, v) { return tx("readwrite", (s) => s.put(v, "ward:" + k)).catch(() => {}); },
+      del(k) { return tx("readwrite", (s) => s.delete("ward:" + k)).catch(() => {}); },
+    };
+  })();
 
-  // -------- state --------
+  // Fallback if IndexedDB is unavailable (rare: private-mode Safari, etc.)
+  const LSfallback = {
+    get(k) { try { return JSON.parse(localStorage.getItem("ward:" + k)); } catch { return undefined; } },
+    set(k, v) { try { localStorage.setItem("ward:" + k, JSON.stringify(v)); } catch {} },
+    del(k) { try { localStorage.removeItem("ward:" + k); } catch {} },
+  };
+  let store = DB;           // swapped to LSfallback at boot if IDB fails
+
+  // -------- state (populated asynchronously at boot) --------
   const state = {
-    decks: LS.get("decks", {}),          // id -> {model, sr:{cardId:srState}}
-    activeId: LS.get("active", null),
-    settings: LS.get("settings", { theme: "dark", reveal: true, claude: false }),
-    practice: null,                       // active practice session
-    review: null,                         // active review session
+    decks: {},               // id -> {model, sr:{cardId:srState}, raw}
+    activeId: null,
+    settings: { theme: "dark", reveal: true, claude: false },
+    practice: null,          // active practice session
+    review: null,            // active review session
   };
   const activeDeck = () => state.decks[state.activeId] || null;
-  const saveDecks = () => LS.set("decks", state.decks);
+  const saveDecks = () => store.set("decks", state.decks);
+  const saveSettings = () => store.set("settings", state.settings);
+  const saveActive = () => store.set("active", state.activeId);
+
+  // Load persisted state; migrate any old localStorage decks into IndexedDB once.
+  async function loadState() {
+    try { await DB.get("decks"); } catch { store = LSfallback; }
+    const g = async (k, d) => { const v = await store.get(k); return v == null ? d : v; };
+    let decks = await g("decks", null);
+    // one-time migration from the previous localStorage-based version
+    if (decks == null) {
+      try {
+        const old = localStorage.getItem("ward:decks");
+        if (old) {
+          decks = JSON.parse(old);
+          await store.set("decks", decks);
+          const oa = localStorage.getItem("ward:active");
+          if (oa) await store.set("active", JSON.parse(oa));
+        }
+      } catch {}
+    }
+    state.decks = decks || {};
+    state.activeId = await g("active", null);
+    state.settings = await g("settings", { theme: "dark", reveal: true, claude: false });
+  }
 
   // -------- theme --------
   function applyTheme() {
@@ -39,9 +95,9 @@
     if (!text || text.trim().length < 40) { toast("Not enough text to build a deck."); return; }
     const model = E.buildModel(text, name ? { title: name } : {});
     const id = "d_" + Date.now().toString(36);
-    state.decks[id] = { model, sr: {}, createdAt: Date.now(), raw: text.slice(0, 200000) };
+    state.decks[id] = { model, sr: {}, createdAt: Date.now(), raw: text };
     state.activeId = id;
-    LS.set("active", id);
+    saveActive();
     saveDecks();
     renderAnalysis(model, true);
     refreshAll();
@@ -102,12 +158,12 @@
         <button class="iconbtn" data-del="${id}" title="Delete" style="width:32px;height:32px">✕</button>
       </div></div>`;
     }).join("");
-    $$("#deckList [data-use]").forEach((b) => b.onclick = () => { state.activeId = b.dataset.use; LS.set("active", b.dataset.use); refreshAll(); toast("Switched deck"); });
+    $$("#deckList [data-use]").forEach((b) => b.onclick = () => { state.activeId = b.dataset.use; saveActive(); refreshAll(); toast("Switched deck"); });
     $$("#deckList [data-del]").forEach((b) => b.onclick = () => {
       if (!confirm("Delete this deck and its review history?")) return;
       delete state.decks[b.dataset.del];
       if (state.activeId === b.dataset.del) state.activeId = Object.keys(state.decks)[0] || null;
-      LS.set("active", state.activeId); saveDecks(); refreshAll();
+      saveActive(); saveDecks(); refreshAll();
     });
   }
 
@@ -380,7 +436,7 @@
     // tabs
     $$(".tab").forEach((t) => t.onclick = () => go(t.dataset.view));
     window.addEventListener("hashchange", () => go((location.hash || "#sources").slice(1)));
-    $("#themeBtn").onclick = () => { state.settings.theme = state.settings.theme === "dark" ? "light" : "dark"; LS.set("settings", state.settings); applyTheme(); };
+    $("#themeBtn").onclick = () => { state.settings.theme = state.settings.theme === "dark" ? "light" : "dark"; saveSettings(); applyTheme(); };
 
     // samples
     $$(".samplecard").forEach((c) => c.onclick = () => {
@@ -400,15 +456,15 @@
     function readFile(f) { const r = new FileReader(); r.onload = () => { $("#paste").value = r.result; $("#deckName").value = f.name.replace(/\.[^.]+$/, ""); toast("Loaded " + f.name + " — press Build."); }; r.readAsText(f); }
 
     // header deck pick
-    $("#deckPick").onchange = (e) => { state.activeId = e.target.value; LS.set("active", state.activeId); refreshAll(); };
+    $("#deckPick").onchange = (e) => { state.activeId = e.target.value; saveActive(); refreshAll(); };
 
     // settings toggles
-    const setTog = (id, key, after) => { const el = $(id); el.classList.toggle("on", !!state.settings[key]); el.onclick = () => { state.settings[key] = !state.settings[key]; el.classList.toggle("on", state.settings[key]); LS.set("settings", state.settings); after && after(); }; };
+    const setTog = (id, key, after) => { const el = $(id); el.classList.toggle("on", !!state.settings[key]); el.onclick = () => { state.settings[key] = !state.settings[key]; el.classList.toggle("on", state.settings[key]); saveSettings(); after && after(); }; };
     setTog("#tgReveal", "reveal");
     setTog("#tgClaude", "claude", () => { if (state.settings.claude) toast("Enrichment on — needs the app on a server with an API key (see README)."); renderRevise(); });
-    $("#tgTheme").onclick = () => { state.settings.theme = state.settings.theme === "dark" ? "light" : "dark"; LS.set("settings", state.settings); applyTheme(); };
+    $("#tgTheme").onclick = () => { state.settings.theme = state.settings.theme === "dark" ? "light" : "dark"; saveSettings(); applyTheme(); };
     $("#exportBtn").onclick = () => { const blob = new Blob([JSON.stringify(state.decks, null, 2)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "ward-decks.json"; a.click(); };
-    $("#resetBtn").onclick = () => { if (confirm("Delete ALL decks, review history and settings?")) { LS.del("decks"); LS.del("active"); LS.del("settings"); location.reload(); } };
+    $("#resetBtn").onclick = () => { if (confirm("Delete ALL decks, review history and settings?")) { store.del("decks"); store.del("active"); store.del("settings"); setTimeout(() => location.reload(), 60); } };
 
     // service worker (offline)
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("service-worker.js").catch(() => {});
@@ -417,6 +473,11 @@
     if (!Object.keys(state.decks).length) go("sources");
   }
 
+  async function boot() {
+    try { await loadState(); } catch (e) { /* start empty on any storage error */ }
+    init();
+  }
+
   if (!E) { document.body.innerHTML = '<p style="padding:40px;font-family:sans-serif">engine.js failed to load. Make sure engine.js sits next to index.html.</p>'; }
-  else document.addEventListener("DOMContentLoaded", init);
+  else document.addEventListener("DOMContentLoaded", boot);
 })();

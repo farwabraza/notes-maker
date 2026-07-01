@@ -75,21 +75,28 @@
     const push = () => {
       if (cur.lines.join("").trim() || cur.title !== "Overview") blocks.push(cur);
     };
-    const qRe = /^\s*\*\*\s*(Q\d+)\s*[:.\)]\s*\*\*\s*(.*)$/; // **Q1:  **stem
+    const qRe = /^\s*\*\*\s*(Q\d+)\s*[:.\)]\s*(.*?)\s*\*\*\s*(.*)$/; // **Q1:** stem  OR  **Q1: stem**
     const qRe2 = /^\s*(Q\d+)\s*[:.\)]\s+(.*)$/;              // Q1: stem (plain)
     const hRe = /^(#{1,6})\s+(.*)$/;
 
     for (const ln of lines) {
       const h = ln.match(hRe);
-      const q = ln.match(qRe) || ln.match(qRe2);
+      let q = null;
+      const qm = ln.match(qRe);
+      if (qm) {
+        q = { id: qm[1], stem: ((qm[2] || "") + " " + (qm[3] || "")).trim() };
+      } else {
+        const qm2 = ln.match(qRe2);
+        if (qm2) q = { id: qm2[1], stem: qm2[2].trim() };
+      }
       if (h) {
         push();
         cur = { title: h[2], level: h[1].length, lines: [], kind: "heading" };
       } else if (q) {
         push();
         cur = {
-          title: q[2] || q[1],
-          qid: q[1],
+          title: q.stem || q.id,
+          qid: q.id,
           level: 4,
           lines: [],
           kind: "question",

@@ -1,132 +1,126 @@
 # Ward — Exam Study Engine
 
-Ward turns raw medical course material into a study system. Paste your notes (or drop a `.md`/`.txt` file) and it restructures everything around **how the topic is actually examined** — then gives you revision sheets, practice questions, a ruthless day-before summary, and spaced-repetition review.
+Ward turns a finished study guide into a study *system*: a revision sheet, practice questions, a ruthless day-before summary, and spaced-repetition review — all restructured around **how the topic is actually examined**.
 
-It runs on **pure logic** — no AI needed, no account, no network. Claude is used for exactly one *optional* extra (a few bonus practice questions per topic), and only if you choose to add a key.
+It runs on **pure logic** — no AI needed, no account, no network, works offline. An **optional** API step (any provider you choose) can generate a few extra practice questions per topic, but everything else works with nothing configured.
 
 ---
 
-## What it does
+## The workflow
 
-Ward reads your material and picks one of two strategies automatically:
+Ward has two halves, and you can use just the first:
 
-- **Exam-driven** — if your notes contain past exam questions (numbered `Q1…Qn`, "examined", oral-exam recall, etc.), it treats those questions as the source of truth. It surfaces what's been tested, extracts the traps (🚩), mnemonics (🧠), key numbers, and builds cards straight off the real questions.
-- **Concept-driven** — if you only have lecture/textbook material, it extracts definitions, key concepts, high-yield (🔥) items, and generates situational + fill-in-the-blank practice from the concepts themselves.
+1. **Build the guide** (in a Claude chat) — hand Claude your past questions + your notes and get back a comprehensive guide weighted toward what professors ask, with a short "not asked" appendix. This synthesis is the AI-heavy part and it lives in a normal Claude conversation. **See `GUIDE-TEMPLATE.md`** for a ready-to-paste prompt and the exact format.
+2. **Study the guide** (in Ward) — paste that guide into Ward. It detects the mode, extracts everything, and builds the study machinery. This half is pure offline logic — no key.
 
-You don't choose the mode — it detects it and shows you which one it picked (with a chip in the header). Two full worked examples are bundled (a nephrology oral-exam guide → exam-driven, and a neuropsychology guide → concept-driven) so you can try it immediately with the **Load a sample** buttons.
+If you already write your own guides, skip step 1 and just paste them in.
+
+### Two modes, detected automatically
+- **Exam-driven** — guide contains past questions (numbered `Qn`, "examined", oral-recall language). Ward treats those questions as the source of truth: surfaces what's tested, pulls traps (🚩), mnemonics (🧠), and key numbers, and builds cards off the real questions.
+- **Concept-driven** — only lecture/textbook material. Ward extracts definitions and key concepts and generates situational + fill-in-the-blank practice.
+
+You don't pick the mode — a chip in the header shows which it chose. Two worked examples are bundled (a nephrology oral-exam guide → exam-driven; a neuropsychology guide → concept-driven). Hit **Load a sample** to try instantly.
 
 ### The five tabs
-- **Sources** — paste/drop material, build a deck, pick a bundled sample, manage decks.
-- **Revise** — the generated revision sheet: topics ranked by testing weight, each with a "heat spine" showing how heavily it's examined.
-- **Practice** — practice questions with tap-to-reveal answers.
-- **Day-before** — a ruthless high-yield cut: only the hottest topics, every trap, every must-know number. What you read the night before.
-- **Review** — spaced repetition (SM-2). Grade each card Again / Hard / Good / Easy; it schedules the next appearance.
+**Sources** (build/manage decks) · **Revise** (ranked revision sheet with the amber "heat spine") · **Practice** (tap-to-reveal questions) · **Day-before** (only the hottest topics, every trap, every must-know number) · **Review** (SM-2 spaced repetition — grade Again/Hard/Good/Easy).
 
-Everything is saved in your browser (localStorage). Decks, review progress, and settings persist across sessions on that device.
+---
+
+## No upload limit
+
+Decks are stored in your browser via **IndexedDB**, so capacity is bound by your device's disk, not the old ~5MB localStorage cap. Paste in as many full-course guides as you like. It's still fully offline and local to the device; nothing is uploaded anywhere. (If you used an earlier localStorage version, your existing decks migrate over automatically on first load.)
+
+> The drop zone accepts `.md`/`.txt`. For a `.docx`, open it, Select-All, and paste the text into the box.
 
 ---
 
 ## Quick start (no install)
 
-Open `index.html` in any modern browser and press **Load a sample**. That's the whole app — the file is self-contained.
-
-> Note on Word docs: the drop zone accepts `.md` and `.txt`. If your material is a `.docx`, open it, Select-All, and paste the text into the box. (The bundled nephrology sample was originally a Word doc, already converted for you.)
+Open `index.html` in any modern browser and press **Load a sample**. That's the whole app.
 
 ---
 
 ## Deploy on Replit + save to your phone
 
-Doing it this way gives you a URL you can open on your phone and **install like an app** — full screen, offline, on your home screen.
+Gives you a URL you can open on your phone and **install like an app** — full screen, offline, on your home screen.
 
 ### 1. Create the Repl
-1. Go to **replit.com**, sign in, and click **Create Repl**.
-2. Choose the **Python** template, name it `ward`, and create it.
-3. Delete the default `main.py` it generates (you're about to upload your own).
+1. Go to **replit.com**, sign in, **Create Repl**, choose the **Python** template, name it `ward`.
+2. Delete the default `main.py` it generates.
 
 ### 2. Upload the app
-1. In the Files panel, click the **⋮ (three dots) → Upload folder**, and upload the whole `studyapp` folder — *or* drag every file from `studyapp/` into the file list.
-   Make sure these all land at the **top level** of the Repl:
-   `index.html`, `engine.js`, `app.js`, `samples.js`, `service-worker.js`, `manifest.json`, `main.py`, `icon-192.png`, `icon-512.png`, and the two config files `.replit` and `replit.nix`.
-2. If Replit hides dotfiles, click **Show hidden files** so `.replit` is present. It's what makes the **Run** button work.
+Upload the whole `studyapp` folder (Files panel → **⋮ → Upload folder**), or drag every file in. These must land at the **top level**:
+`index.html`, `engine.js`, `app.js`, `samples.js`, `service-worker.js`, `manifest.json`, `main.py`, `icon-192.png`, `icon-512.png`, plus `.replit` and `replit.nix`.
+If Replit hides dotfiles, enable **Show hidden files** so `.replit` is visible — it's what makes **Run** work.
 
-### 3. Run it
-1. Press **Run**. The console should print `Ward running → http://0.0.0.0:3000`.
-2. A **Webview** pane opens with the app. Click the **↗ / "Open in new tab"** icon to get the full URL (looks like `https://ward.<your-username>.repl.co`).
-3. Open that URL and confirm **Load a sample** works.
+### 3. Run
+Press **Run**. The console prints `Ward running → http://0.0.0.0:3000` and a Webview opens. Click **Open in new tab** for the full URL (`https://ward.<username>.repl.co`). Confirm **Load a sample** works.
 
-> The server (`main.py`) uses only the Python standard library — nothing to `pip install`. It exists purely to serve the files so the phone install works offline.
+> `main.py` uses only the Python standard library — nothing to install. It exists to serve the files so the phone install works offline.
 
-### 4. (Optional) Turn on Claude enrichment
-Only needed if you want the **"+ more practice"** button that asks Claude for a few extra exam-style questions on a topic. The app is fully functional without it.
-1. In the Repl, open the **Secrets** tool (🔒 lock icon).
-2. Add a secret named `ANTHROPIC_API_KEY` with your key as the value.
-3. (Optional) add `CLAUDE_MODEL` — defaults to `claude-sonnet-4-6`.
-4. Press **Run** again. The console will now say `Claude enrichment: ON`.
+### 4. Save to your phone's home screen
+**iPhone/iPad (Safari):** open the URL → **Share** → **Add to Home Screen** → **Add**.
+**Android (Chrome):** open the URL → **⋮** → **Add to Home screen** → **Install**.
 
-Without a key the enrichment button simply stays off; everything else is unaffected.
+After the first online load, the service worker caches the app and it **works offline** thereafter. Free Repls sleep when idle, but once installed and loaded once, the app runs from cache — a sleeping Repl doesn't stop you studying (you only need it awake for the first load and for fresh enrichment).
 
-### 5. Save it to your phone's home screen
+---
 
-**iPhone / iPad (Safari):**
-1. Open your Repl's URL in **Safari**.
-2. Tap the **Share** button (the square with an up-arrow).
-3. Scroll down, tap **Add to Home Screen**, then **Add**.
-4. Launch it from the new "Ward" icon — it opens full-screen, no browser bar.
+## Deploy on GitHub (Pages)
 
-**Android (Chrome):**
-1. Open the URL in **Chrome**.
-2. Tap the **⋮** menu (top right).
-3. Tap **Add to Home screen** → **Install**.
-4. Launch from the icon.
+Ward is static, so GitHub Pages hosts it directly — great for the offline PWA. The only thing Pages can't do is the optional enrichment button (that needs the Python server; see below).
 
-After the first load with a network connection, the app caches itself (via `service-worker.js`) and **works offline** — on a plane, in a basement exam hall, wherever. Your decks live on the device.
+1. Create a repo and upload the `studyapp` files to the root (or a `/docs` folder).
+2. Repo **Settings → Pages** → Source: **Deploy from a branch** → pick your branch and `/root` (or `/docs`).
+3. Wait for the green check, then open `https://<username>.github.io/<repo>/`.
+4. Install to your phone's home screen exactly as in the Replit steps above.
 
-> Keep-alive note: free Repls sleep when idle. Once the app is installed to your home screen and has loaded once, it runs offline from cache, so a sleeping Repl doesn't stop you studying. You only need it awake to load the very first time or to fetch fresh enrichment.
+Everything works on Pages except **+ more practice**. If you want enrichment with a static host, run the enrichment provider separately (any host that can run `main.py`, or a serverless function) and the app will call `/api/enrich`.
+
+---
+
+## Optional: enrichment with any provider
+
+The **+ more practice** button asks a model for a few extra exam-style questions on a topic. It's the *only* feature that touches the network, and only if you configure it. The provider is pluggable — set environment variables (in Replit: the **Secrets** 🔒 panel).
+
+| Provider | `PROVIDER` | `MODEL` (example) | `API_KEY` | `BASE_URL` (optional) |
+|----------|-----------|-------------------|-----------|-----------------------|
+| Claude (Anthropic) | `anthropic` | `claude-sonnet-4-6` | your Anthropic key | default `https://api.anthropic.com` |
+| OpenAI | `openai` | `gpt-4o-mini` | your OpenAI key | default `https://api.openai.com/v1` |
+| OpenRouter | `openai` | e.g. `anthropic/claude-3.5-sonnet` | your OpenRouter key | `https://openrouter.ai/api/v1` |
+| Groq | `openai` | e.g. `llama-3.3-70b-versatile` | your Groq key | `https://api.groq.com/openai/v1` |
+| Local (Ollama/LM Studio/vLLM) | `openai` | your local model name | any placeholder | e.g. `http://localhost:11434/v1` |
+| Google Gemini | `gemini` | `gemini-2.5-flash` | your Gemini key | default Google endpoint |
+
+Set `PROVIDER`, `MODEL`, and `API_KEY` (a bare `API_KEY` works, or the classic `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`). Anything OpenAI-compatible uses `PROVIDER=openai` with a `BASE_URL`. Press **Run** again; the console shows `Enrichment: ON (provider=…, model=…)`. Check `/api/health` to confirm.
+
+**On NotebookLM:** there's no public consumer API you can drop a key into — Google's only official surface is an *enterprise* API that needs a Google Cloud project, IAM roles, and OAuth tokens, and its outputs are summary/podcast-oriented rather than "answer these exam questions from my notes." So it isn't wired in as a provider. The natural Google option here is the **Gemini API** (`PROVIDER=gemini`), which is a real developer API with a simple key.
+
+Without any of this, enrichment just stays off and nothing else is affected.
 
 ---
 
 ## Deploy anywhere else
 
-Ward is just static files plus one optional tiny server.
-
-- **Any static host** (GitHub Pages, Netlify, Vercel, S3): upload the folder; `index.html` is the entry point. Everything works except the optional enrichment button (which needs the Python server).
-- **Locally with the server:** `python3 main.py` then open `http://localhost:3000`. Set `PORT` to change the port, `ANTHROPIC_API_KEY` to enable enrichment.
+- **Any static host** (Netlify, Vercel, S3): upload the folder; `index.html` is the entry point. Everything works except enrichment.
+- **Locally with the server:** `python3 main.py`, open `http://localhost:3000`. `PORT` changes the port; provider vars enable enrichment.
 - **Locally without Python:** just open `index.html`.
 
 ---
 
-## Using your own material
+## Markers Ward understands
 
-1. Go to **Sources**.
-2. Paste your notes into the box, or drop a `.md`/`.txt` file.
-3. Give the deck a name and click **Build deck**.
-4. Ward detects the mode and builds everything. Switch tabs to study.
-
-### Markers it understands
-You don't need these, but if your notes use them, Ward reads them as signal:
+You don't need these, but if your guide uses them, Ward reads them as signal. `GUIDE-TEMPLATE.md` has the full spec.
 
 | Marker | Meaning |
 |--------|---------|
-| 🔥 | high-yield / has appeared on exams |
-| 🚩 | exam trap (surfaced prominently + in day-before) |
-| 🧠 | mnemonic / memory trick |
+| 🔥 | high-yield / appeared on exams |
+| 🚩 | exam trap (surfaced + in day-before) |
+| 🧠 | mnemonic |
 | ⭐ | key line |
 | 🔑 | key mechanism |
-| 🎯 | an MCQ block |
-| 📚 | source reference |
-| `Q1:`, `Q2:` … | numbered exam questions (triggers exam-driven mode) |
-| `> text` | a definition (blockquote) |
-
----
-
-## How it works (for the curious)
-
-- `engine.js` — the whole brain. Parses blocks, detects mode, extracts definitions/mnemonics/traps/MCQs/reference tables/clinical numbers, scores each topic by testing weight (`heat×3 + isQuestion×4 + traps×2 + …`), generates the revision/day-before/practice outputs, and runs the SM-2 spaced-repetition scheduler. Zero DOM dependencies — same file runs in Node and the browser.
-- `app.js` — the UI controller and localStorage persistence.
-- `index.html` — the shell + clinical dark/light theme (the amber "heat spine" is the signature).
-- `samples.js` — the two bundled example guides, so samples work fully offline.
-- `service-worker.js` + `manifest.json` + icons — what makes it installable and offline-capable.
-- `main.py` — optional stdlib-only server; serves the app and proxies the one enrichment endpoint.
+| `**Qn: …**` | numbered exam question (triggers exam-driven mode) |
+| `> text` | definition |
 
 ---
 
@@ -136,15 +130,17 @@ You don't need these, but if your notes use them, Ward reads them as signal:
 studyapp/
 ├── index.html          app shell + theme
 ├── engine.js           parser + scheduler (logic core, no deps)
-├── app.js              UI controller + storage
+├── app.js              UI controller + IndexedDB storage
 ├── samples.js          bundled example guides
 ├── service-worker.js   offline caching
 ├── manifest.json       PWA manifest
 ├── icon-192.png        app icons
 ├── icon-512.png
-├── main.py             optional backend (stdlib only)
+├── main.py             optional backend (stdlib only, multi-provider)
 ├── .replit             Replit run config
-└── replit.nix          Replit environment
+├── replit.nix          Replit environment
+├── GUIDE-TEMPLATE.md   prompt + format for building guides
+└── README.md
 ```
 
 No build step. No dependencies. No account required.
