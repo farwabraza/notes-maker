@@ -1,6 +1,6 @@
 /* Ward service worker — offline after first load.
    Cache-first for the app shell; network-first-with-fallback for fonts. */
-const CACHE = "ward-v2";
+const CACHE = "ward-v3";
 const SHELL = [
   "./",
   "./index.html",
