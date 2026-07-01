@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0f1419" />
+<title>Ward — Exam Study Engine</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Ward" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --bg:#0f1419; --bg2:#0b0f13; --surface:#171d24; --surface2:#1c242d;
+  --line:#242e39; --line2:#2f3b47;
+  --ink:#e7eef4; --mut:#8a97a4; --mut2:#5f6d7a;
+  --amber:#f0a202; --amber-dim:#3a2e10;
+  --cyan:#33c9c9; --cyan-dim:#0f3336;
+  --rose:#e5646e; --rose-dim:#3a1b20;
+  --green:#4fb477; --violet:#a98be6;
+  --shadow:0 1px 0 rgba(255,255,255,.02) inset, 0 8px 24px -12px rgba(0,0,0,.7);
+  --r:14px; --r-sm:9px;
+  --disp:"Bricolage Grotesque",Georgia,serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+:root[data-theme="light"]{
+  --bg:#f4f2ec; --bg2:#eceae2; --surface:#ffffff; --surface2:#f7f6f1;
+  --line:#e0ddd2; --line2:#d2cec1;
+  --ink:#1e2529; --mut:#5c6670; --mut2:#8a949e;
+  --amber:#b8720a; --amber-dim:#f5e6c8;
+  --cyan:#0e8b8b; --cyan-dim:#d6efef;
+  --rose:#c33b46; --rose-dim:#f6dde0;
+  --green:#2f8d57; --violet:#6a4fb0;
+  --shadow:0 1px 2px rgba(0,0,0,.04),0 10px 24px -16px rgba(0,0,0,.25);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:
+    radial-gradient(1200px 600px at 82% -10%, color-mix(in srgb,var(--cyan) 7%,transparent), transparent 60%),
+    radial-gradient(900px 500px at 0% 108%, color-mix(in srgb,var(--amber) 6%,transparent), transparent 55%),
+    var(--bg);
+  color:var(--ink); font-family:var(--body);
+  font-size:15.5px; line-height:1.5; -webkit-font-smoothing:antialiased;
+  min-height:100vh;
+}
+a{color:var(--cyan)}
+::selection{background:color-mix(in srgb,var(--amber) 35%,transparent)}
+.wrap{max-width:820px;margin:0 auto;padding:0 16px calc(96px + env(safe-area-inset-bottom)) 16px}
+
+/* ---------- header ---------- */
+header.top{
+  position:sticky;top:0;z-index:30;
+  backdrop-filter:blur(14px);
+  background:color-mix(in srgb,var(--bg) 78%,transparent);
+  border-bottom:1px solid var(--line);
+}
+.top .row{max-width:820px;margin:0 auto;display:flex;align-items:center;gap:12px;
+  padding:calc(10px + env(safe-area-inset-top)) 16px 10px}
+.brand{display:flex;align-items:baseline;gap:9px;min-width:0}
+.brand .mark{font-family:var(--disp);font-weight:800;font-size:20px;letter-spacing:-.02em;
+  color:var(--ink);line-height:1}
+.brand .mark b{color:var(--amber)}
+.brand .sub{font-family:var(--mono);font-size:10.5px;color:var(--mut2);
+  text-transform:uppercase;letter-spacing:.12em;white-space:nowrap}
+.spacer{flex:1}
+.iconbtn{background:var(--surface);border:1px solid var(--line);color:var(--mut);
+  width:36px;height:36px;border-radius:10px;display:grid;place-items:center;cursor:pointer;
+  font-size:15px;transition:.15s}
+.iconbtn:hover{border-color:var(--line2);color:var(--ink)}
+
+.deckbar{max-width:820px;margin:0 auto;display:flex;align-items:center;gap:8px;
+  padding:0 16px 10px;flex-wrap:wrap}
+.deckpick{appearance:none;background:var(--surface);border:1px solid var(--line);
+  color:var(--ink);font-family:var(--body);font-size:13.5px;font-weight:600;
+  border-radius:9px;padding:6px 30px 6px 11px;cursor:pointer;max-width:60vw;
+  text-overflow:ellipsis;
+  background-image:linear-gradient(45deg,transparent 50%,var(--mut) 50%),linear-gradient(135deg,var(--mut) 50%,transparent 50%);
+  background-position:calc(100% - 15px) 14px,calc(100% - 10px) 14px;background-size:5px 5px;background-repeat:no-repeat}
+.modechip{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.08em;
+  padding:4px 9px;border-radius:20px;border:1px solid;text-transform:uppercase}
+.modechip.exam{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 45%,transparent);
+  background:var(--amber-dim)}
+.modechip.concept{color:var(--cyan);border-color:color-mix(in srgb,var(--cyan) 45%,transparent);
+  background:var(--cyan-dim)}
+.ministat{font-family:var(--mono);font-size:11px;color:var(--mut);margin-left:auto}
+.ministat b{color:var(--ink)}
+
+/* ---------- tab bar (bottom, thumb reach) ---------- */
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:40;
+  background:color-mix(in srgb,var(--bg) 92%,transparent);
+  backdrop-filter:blur(16px);border-top:1px solid var(--line);
+  padding:6px 8px calc(6px + env(safe-area-inset-bottom))}
+.tabs .inner{max-width:820px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr);gap:2px}
+.tab{background:none;border:0;color:var(--mut2);cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 2px;border-radius:10px;
+  font-family:var(--body);font-size:10.5px;font-weight:600;transition:.15s;position:relative}
+.tab svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.8}
+.tab.active{color:var(--amber)}
+.tab.active::before{content:"";position:absolute;top:0;width:22px;height:2.5px;border-radius:2px;background:var(--amber)}
+.tab .badge{position:absolute;top:3px;right:calc(50% - 22px);min-width:16px;height:16px;padding:0 4px;
+  border-radius:9px;background:var(--rose);color:#fff;font-size:9.5px;font-weight:700;
+  display:grid;place-items:center;font-family:var(--mono)}
+
+/* ---------- generic ---------- */
+.view{display:none;animation:fade .25s ease}
+.view.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.h{font-family:var(--disp);font-weight:700;letter-spacing:-.02em;line-height:1.1}
+.viewhead{margin:20px 0 6px}
+.viewhead h1{font-family:var(--disp);font-weight:800;font-size:26px;letter-spacing:-.03em;margin:0}
+.viewhead p{color:var(--mut);font-size:13.5px;margin:5px 0 0}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--shadow);margin:12px 0;overflow:hidden}
+.card .pad{padding:15px 16px}
+
+/* heat spine — the signature element */
+.spined{display:flex;gap:0}
+.spine{width:6px;flex:0 0 6px;background:var(--line);position:relative}
+.spine i{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(var(--amber),color-mix(in srgb,var(--amber) 60%,var(--rose)));
+  border-radius:0 0 3px 3px}
+.spine.s0{background:var(--line)}
+.spinebody{flex:1;min-width:0}
+
+.btn{font-family:var(--body);font-weight:600;font-size:14px;border-radius:10px;
+  padding:10px 15px;border:1px solid var(--line2);background:var(--surface2);color:var(--ink);
+  cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:7px;justify-content:center}
+.btn:hover{border-color:var(--cyan);color:var(--ink)}
+.btn.primary{background:var(--amber);border-color:var(--amber);color:#1a1206}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.ghost{background:none}
+.btn.block{width:100%}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap}
+
+.chip{font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.03em;
+  padding:3px 8px;border-radius:6px;border:1px solid var(--line2);color:var(--mut);
+  background:var(--surface2);white-space:nowrap}
+.chip.amber{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 40%,transparent);background:var(--amber-dim)}
+.chip.cyan{color:var(--cyan);border-color:color-mix(in srgb,var(--cyan) 40%,transparent);background:var(--cyan-dim)}
+.chip.rose{color:var(--rose);border-color:color-mix(in srgb,var(--rose) 40%,transparent);background:var(--rose-dim)}
+.chip.violet{color:var(--violet);border-color:color-mix(in srgb,var(--violet) 40%,transparent)}
+.chip.green{color:var(--green);border-color:color-mix(in srgb,var(--green) 40%,transparent)}
+
+.qid{font-family:var(--mono);font-size:11px;color:var(--amber);font-weight:600}
+.mut{color:var(--mut)}
+.tiny{font-size:12px}
+kbd{font-family:var(--mono);font-size:11px;background:var(--surface2);border:1px solid var(--line2);
+  border-bottom-width:2px;border-radius:5px;padding:1px 6px;color:var(--mut)}
+
+/* revision topic */
+.topic .thead{display:flex;align-items:flex-start;gap:10px;cursor:pointer;user-select:none}
+.topic .ttitle{font-family:var(--disp);font-weight:700;font-size:16.5px;letter-spacing:-.01em;
+  line-height:1.25;flex:1;min-width:0}
+.topic .caret{color:var(--mut2);transition:.2s;flex:0 0 auto;margin-top:3px}
+.topic.open .caret{transform:rotate(90deg)}
+.topic .tbody{display:none;margin-top:12px}
+.topic.open .tbody{display:block}
+.def{background:var(--surface2);border-left:2px solid var(--cyan);border-radius:0 8px 8px 0;
+  padding:9px 12px;font-size:14px;margin:0 0 10px;color:var(--ink)}
+.blk{margin:10px 0 0}
+.blk .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--mut2);margin-bottom:5px;display:flex;align-items:center;gap:6px}
+.hook,.trap,.numrow{font-size:13.5px;padding:7px 11px;border-radius:8px;margin:5px 0}
+.hook{background:color-mix(in srgb,var(--violet) 9%,var(--surface2));border:1px solid color-mix(in srgb,var(--violet) 22%,transparent)}
+.hook b{color:var(--violet)}
+.trap{background:var(--rose-dim);border:1px solid color-mix(in srgb,var(--rose) 28%,transparent)}
+.trap b{color:var(--rose)}
+.nums{display:flex;flex-wrap:wrap;gap:6px}
+.numrow{font-family:var(--mono);font-size:12px;background:var(--surface2);border:1px solid var(--line2);
+  padding:5px 9px;display:flex;gap:7px;align-items:baseline;margin:0}
+.numrow .v{color:var(--amber);font-weight:600}
+.mcqmini{border-top:1px dashed var(--line2);padding-top:8px;margin-top:9px;font-size:13.5px}
+.mcqmini .a{color:var(--cyan);margin-top:2px}
+
+/* practice / review flashcard */
+.flash{min-height:230px;display:flex;flex-direction:column}
+.flash .fmeta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.flash .front{font-family:var(--disp);font-weight:700;font-size:19px;line-height:1.3;letter-spacing:-.01em}
+.flash .back{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);
+  font-size:15px;white-space:pre-wrap;line-height:1.55;color:var(--ink)}
+.flash .back.hidden{filter:blur(9px);opacity:.35;pointer-events:none;user-select:none}
+.gradebar{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:16px}
+.grade{padding:11px 4px;border-radius:10px;border:1px solid var(--line2);background:var(--surface2);
+  cursor:pointer;text-align:center;font-weight:600;font-size:13px;transition:.12s}
+.grade small{display:block;font-family:var(--mono);font-size:9.5px;color:var(--mut2);margin-top:2px;font-weight:400}
+.grade:hover{transform:translateY(-1px)}
+.grade.again{color:var(--rose)}.grade.again:hover{border-color:var(--rose);background:var(--rose-dim)}
+.grade.hard{color:var(--amber)}.grade.hard:hover{border-color:var(--amber);background:var(--amber-dim)}
+.grade.good{color:var(--cyan)}.grade.good:hover{border-color:var(--cyan);background:var(--cyan-dim)}
+.grade.easy{color:var(--green)}.grade.easy:hover{border-color:var(--green)}
+.progressline{height:4px;background:var(--line);border-radius:3px;overflow:hidden;margin:2px 0 14px}
+.progressline i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--amber));transition:.3s}
+
+/* stats grid */
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 10px;text-align:center}
+.stat .n{font-family:var(--mono);font-size:23px;font-weight:600;line-height:1}
+.stat .k{font-size:10.5px;color:var(--mut);margin-top:5px;text-transform:uppercase;letter-spacing:.06em}
+.stat.due .n{color:var(--rose)}.stat.new .n{color:var(--cyan)}
+.stat.learn .n{color:var(--amber)}.stat.mature .n{color:var(--green)}
+
+/* sources */
+textarea.paste{width:100%;min-height:150px;background:var(--bg2);border:1px solid var(--line2);
+  border-radius:12px;color:var(--ink);font-family:var(--mono);font-size:12.5px;padding:12px;resize:vertical;line-height:1.5}
+textarea.paste:focus{outline:none;border-color:var(--cyan)}
+.drop{border:1.5px dashed var(--line2);border-radius:12px;padding:22px;text-align:center;color:var(--mut);
+  transition:.15s;cursor:pointer}
+.drop.over{border-color:var(--cyan);background:var(--cyan-dim);color:var(--ink)}
+.samplerow{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
+.samplecard{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px;cursor:pointer;transition:.15s}
+.samplecard:hover{border-color:var(--amber);transform:translateY(-1px)}
+.samplecard .t{font-family:var(--disp);font-weight:700;font-size:14.5px;margin-bottom:3px}
+.samplecard .d{font-size:11.5px;color:var(--mut)}
+
+.analysis{background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:12px}
+.analysis h4{margin:0 0 8px;font-family:var(--disp);font-size:14px}
+.abar{display:flex;height:9px;border-radius:5px;overflow:hidden;margin:10px 0 6px;background:var(--line)}
+.abar i{height:100%}
+.leg{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;color:var(--mut)}
+.leg span::before{content:"";display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
+
+.section-label{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--mut2);margin:22px 0 4px;display:flex;align-items:center;gap:8px}
+.section-label::after{content:"";flex:1;height:1px;background:var(--line)}
+.empty{text-align:center;color:var(--mut);padding:40px 20px}
+.empty .big{font-size:34px;margin-bottom:8px}
+.toolbar{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:10px 0}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:9px;overflow:hidden;background:var(--surface)}
+.seg button{background:none;border:0;color:var(--mut);padding:6px 11px;font-family:var(--body);font-size:12.5px;
+  font-weight:600;cursor:pointer;border-right:1px solid var(--line2)}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--surface2);color:var(--amber)}
+.switch{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.switch .lab{font-weight:600;font-size:14px}
+.switch .lab small{display:block;color:var(--mut);font-weight:400;font-size:12px;margin-top:2px}
+.toggle{width:46px;height:26px;border-radius:20px;background:var(--line2);border:0;cursor:pointer;position:relative;transition:.2s;flex:0 0 auto}
+.toggle i{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.2s}
+.toggle.on{background:var(--cyan)}.toggle.on i{left:23px}
+
+@media(max-width:520px){
+  body{font-size:15px}
+  .viewhead h1{font-size:23px}
+  .grid4{grid-template-columns:repeat(2,1fr)}
+  .gradebar{grid-template-columns:repeat(2,1fr)}
+  .samplerow{grid-template-columns:1fr}
+}
+@media print{
+  header.top,nav.tabs,.toolbar,.btnrow,.tab{display:none!important}
+  body{background:#fff;color:#000}
+  .view{display:none!important}.view.active{display:block!important}
+  .card{break-inside:avoid;box-shadow:none;border-color:#ccc}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="row">
+    <div class="brand">
+      <span class="mark">Ward<b>.</b></span>
+      <span class="sub">exam study engine</span>
+    </div>
+    <span class="spacer"></span>
+    <button class="iconbtn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">◐</button>
+  </div>
+  <div class="deckbar" id="deckbar" hidden>
+    <select class="deckpick" id="deckPick" aria-label="Choose deck"></select>
+    <span class="modechip" id="modeChip"></span>
+    <span class="ministat" id="miniStat"></span>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- SOURCES -->
+  <section class="view active" id="view-sources">
+    <div class="viewhead">
+      <h1>Sources</h1>
+      <p>Drop in course material. The engine detects whether past questions exist and restructures your notes around what's actually tested.</p>
+    </div>
+
+    <div class="section-label">Load a worked example</div>
+    <div class="samplerow">
+      <div class="samplecard" data-sample="nephrology">
+        <div class="t">Nephrology · oral exam</div>
+        <div class="d">44 past questions available → <b>exam-driven</b> restructuring around tested patterns + traps.</div>
+      </div>
+      <div class="samplecard" data-sample="neuropsychology">
+        <div class="t">Neuropsychology · lectures only</div>
+        <div class="d">No past questions → <b>concept-driven</b>: concepts extracted, situational questions generated.</div>
+      </div>
+    </div>
+
+    <div class="section-label">Or add your own</div>
+    <div class="drop" id="drop">
+      <div style="font-size:26px;margin-bottom:6px">⤓</div>
+      <div><b>Drop or tap</b> to upload a <kbd>.md</kbd> / <kbd>.txt</kbd> file</div>
+      <div class="tiny mut" style="margin-top:4px">Word (.docx): open it, Select All, and paste below instead.</div>
+      <input type="file" id="file" accept=".md,.txt,.markdown,text/plain,text/markdown" hidden />
+    </div>
+    <div style="margin-top:12px">
+      <textarea class="paste" id="paste" placeholder="…or paste your notes / past-paper questions here (markdown works best — headings, **bold**, tables, > definitions, 🔥 heat, 🚩 traps, 🧠 mnemonics all understood)"></textarea>
+      <div class="btnrow" style="margin-top:10px">
+        <input id="deckName" class="paste" style="min-height:auto;flex:1;font-family:var(--body);padding:10px 12px;font-size:14px" placeholder="Deck name (optional)" />
+        <button class="btn primary" id="buildBtn">Build deck →</button>
+      </div>
+    </div>
+
+    <div id="analysisWrap"></div>
+
+    <div class="section-label" id="deckListLabel" hidden>Your decks</div>
+    <div id="deckList"></div>
+  </section>
+
+  <!-- REVISE -->
+  <section class="view" id="view-revise">
+    <div class="viewhead"><h1>Revision sheet</h1><p id="reviseSub">Every topic, condensed to what earns marks — ordered by exam weight.</p></div>
+    <div class="toolbar" id="reviseTools"></div>
+    <div id="reviseBody"></div>
+  </section>
+
+  <!-- PRACTICE -->
+  <section class="view" id="view-practice">
+    <div class="viewhead"><h1>Practice</h1><p>Active recall over generated questions. Grade yourself — it feeds your review schedule.</p></div>
+    <div class="toolbar" id="practiceTools"></div>
+    <div id="practiceBody"></div>
+  </section>
+
+  <!-- DAY BEFORE -->
+  <section class="view" id="view-daybefore">
+    <div class="viewhead"><h1>Day-before summary</h1><p>Ruthless. Only the highest-yield: hot topics, every trap, every mnemonic, every number. If you read one thing, read this.</p></div>
+    <div class="btnrow" style="margin:6px 0 4px"><button class="btn ghost" onclick="window.print()">⎙ Print / save PDF</button></div>
+    <div id="dayBody"></div>
+  </section>
+
+  <!-- REVIEW (SR) -->
+  <section class="view" id="view-review">
+    <div class="viewhead"><h1>Review</h1><p>Spaced repetition (SM-2). Cards resurface right before you'd forget them.</p></div>
+    <div class="grid4" id="srStats" style="margin:12px 0"></div>
+    <div id="reviewBody"></div>
+  </section>
+
+  <!-- SETTINGS (hidden view, reached from header) -->
+  <section class="view" id="view-settings">
+    <div class="viewhead"><h1>Settings</h1><p>Everything runs on-device. Nothing leaves your phone unless you turn on Claude enrichment.</p></div>
+    <div class="switch"><div class="lab">Dark theme<small>Night-before-the-exam mode</small></div><button class="toggle on" id="tgTheme"><i></i></button></div>
+    <div class="switch"><div class="lab">Reveal answers on tap<small>Off = answers always visible in practice</small></div><button class="toggle on" id="tgReveal"><i></i></button></div>
+    <div class="switch"><div class="lab">Claude enrichment <span class="chip cyan">optional</span><small>Generate extra exam-style questions. Needs the app running on a server with an API key set (see README). Fully offline without it.</small></div><button class="toggle" id="tgClaude"><i></i></button></div>
+    <div class="section-label">Data</div>
+    <div class="btnrow">
+      <button class="btn" id="exportBtn">⭳ Export all decks (JSON)</button>
+      <button class="btn ghost" id="resetBtn" style="color:var(--rose)">Reset everything</button>
+    </div>
+    <p class="tiny mut" style="margin-top:20px">Ward v1.0 · pure-logic study engine · SM-2 scheduling · works offline</p>
+  </section>
+</main>
+
+<nav class="tabs">
+  <div class="inner">
+    <button class="tab active" data-view="sources"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Sources</button>
+    <button class="tab" data-view="revise"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/></svg>Revise</button>
+    <button class="tab" data-view="practice"><svg viewBox="0 0 24 24"><path d="M12 3l2.5 5 5.5.8-4 3.9 1 5.5L12 21l-5 2.6M12 3L9.5 8 4 8.8l4 3.9-1 5.5"/></svg>Practice</button>
+    <button class="tab" data-view="daybefore"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>Day-before</button>
+    <button class="tab" data-view="review"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7M21 4v4h-4"/></svg>Review<span class="badge" id="dueBadge" hidden>0</span></button>
+  </div>
+</nav>
+
+<script src="engine.js"></script>
+<script src="samples.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
