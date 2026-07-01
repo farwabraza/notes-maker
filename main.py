@@ -469,10 +469,25 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send(500, {"error": f"{type(e).__name__}: {e}"})
 
+    def do_HEAD(self):
+        # Uptime monitors and some proxies probe with HEAD; answer like GET
+        # for the health route, minimal 200 elsewhere.
+        if self.path.split("?")[0] == "/api/health":
+            body = json.dumps({"ok": True}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+        else:
+            self.send_response(200)
+            self.end_headers()
+
     def do_GET(self):
         path = self.path.split("?")[0]
         if path in ("/", ""):
             path = "/index.html"
+        if path == "/favicon.ico":
+            path = "/icon-192.png"
         if path == "/api/health":
             return self._send(200, {"ok": True, "enrichment": bool(API_KEY),
                                      "provider": PROVIDER, "model": MODEL})
@@ -493,9 +508,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"  Ward running →  http://0.0.0.0:{PORT}")
+    print(f"  Ward running →  http://0.0.0.0:{PORT}", flush=True)
     if API_KEY:
-        print(f"  Enrichment: ON  (provider={PROVIDER}, model={MODEL})")
+        print(f"  Enrichment: ON  (provider={PROVIDER}, model={MODEL})", flush=True)
     else:
-        print("  Enrichment: off  (set API_KEY + PROVIDER to enable — see README)")
+        print("  Enrichment: off  (set API_KEY + PROVIDER to enable — see README)", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
