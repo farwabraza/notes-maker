@@ -1,146 +1,149 @@
-# Ward — Exam Study Engine
+# Ward — a self-contained exam-study workspace
 
-Ward turns a finished study guide into a study *system*: a revision sheet, practice questions, a ruthless day-before summary, and spaced-repetition review — all restructured around **how the topic is actually examined**.
+Ward turns your course material into things you can actually study from, organised
+by subject. It runs as an installable web app (PWA). Everything you make is stored
+**on your device** and exportable as **PDF**.
 
-It runs on **pure logic** — no AI needed, no account, no network, works offline. An **optional** API step (any provider you choose) can generate a few extra practice questions per topic, but everything else works with nothing configured.
+Each **subject** is a self-contained folder holding three kinds of item:
 
----
+| Item | What it is | Needs a key? |
+|------|------------|--------------|
+| **Structured guide** | Your material, authored into a 100%-coverage study guide. Give it past questions → it answers every one at depth (exam-driven); give it none → it builds from the material and generates questions (concept-driven). Then: revise sheet, practice cards, day-before summary, spaced-repetition review. | Yes (to build) |
+| **Sbobina** | A raw transcript / rough notes rewritten into a clean, readable lecture write-up, with open-licensed figures. | Yes |
+| **Cheat sheet** | A dense one-page condensation of a guide or sbobina. | Yes |
 
-## The workflow
-
-Ward has two halves, and you can use just the first:
-
-1. **Build the guide** (in a Claude chat) — hand Claude your past questions + your notes and get back a comprehensive guide weighted toward what professors ask, with a short "not asked" appendix. This synthesis is the AI-heavy part and it lives in a normal Claude conversation. **See `GUIDE-TEMPLATE.md`** for a ready-to-paste prompt and the exact format.
-2. **Study the guide** (in Ward) — paste that guide into Ward. It detects the mode, extracts everything, and builds the study machinery. This half is pure offline logic — no key.
-
-If you already write your own guides, skip step 1 and just paste them in.
-
-### Two modes, detected automatically
-- **Exam-driven** — guide contains past questions (numbered `Qn`, "examined", oral-recall language). Ward treats those questions as the source of truth: surfaces what's tested, pulls traps (🚩), mnemonics (🧠), and key numbers, and builds cards off the real questions.
-- **Concept-driven** — only lecture/textbook material. Ward extracts definitions and key concepts and generates situational + fill-in-the-blank practice.
-
-You don't pick the mode — a chip in the header shows which it chose. Two worked examples are bundled (a nephrology oral-exam guide → exam-driven; a neuropsychology guide → concept-driven). Hit **Load a sample** to try instantly.
-
-### The five tabs
-**Sources** (build/manage decks) · **Revise** (ranked revision sheet with the amber "heat spine") · **Practice** (tap-to-reveal questions) · **Day-before** (only the hottest topics, every trap, every must-know number) · **Review** (SM-2 spaced repetition — grade Again/Hard/Good/Easy).
+Delete a subject folder and everything in it goes with it — handy once an exam is done.
 
 ---
 
-## No upload limit
+## Two ways to run it
 
-Decks are stored in your browser via **IndexedDB**, so capacity is bound by your device's disk, not the old ~5MB localStorage cap. Paste in as many full-course guides as you like. It's still fully offline and local to the device; nothing is uploaded anywhere. (If you used an earlier localStorage version, your existing decks migrate over automatically on first load.)
+**1. Static (offline study, no server).** Open `index.html`, or host the folder on
+GitHub Pages / any static host. You get: guides, revise/practice/day-before/review,
+and PDF export. The **makers that call an LLM (sbobina, cheat sheet, extra questions)
+do not work statically** — there's no server to hold your key.
 
-> The drop zone accepts `.md`/`.txt`. For a `.docx`, open it, Select-All, and paste the text into the box.
+**2. On a server (full features).** Run `python main.py` (or press **Run** on Replit).
+Now the sbobina maker, cheat-sheet maker, extra-questions and open-licensed image
+lookup all work. This is the mode to use with your API key.
 
----
-
-## Quick start (no install)
-
-Open `index.html` in any modern browser and press **Load a sample**. That's the whole app.
-
----
-
-## Deploy on Replit + save to your phone
-
-Gives you a URL you can open on your phone and **install like an app** — full screen, offline, on your home screen.
-
-### 1. Create the Repl
-1. Go to **replit.com**, sign in, **Create Repl**, choose the **Python** template, name it `ward`.
-2. Delete the default `main.py` it generates.
-
-### 2. Upload the app
-Upload the whole `studyapp` folder (Files panel → **⋮ → Upload folder**), or drag every file in. These must land at the **top level**:
-`index.html`, `engine.js`, `app.js`, `samples.js`, `service-worker.js`, `manifest.json`, `main.py`, `icon-192.png`, `icon-512.png`, plus `.replit` and `replit.nix`.
-If Replit hides dotfiles, enable **Show hidden files** so `.replit` is visible — it's what makes **Run** work.
-
-### 3. Run
-Press **Run**. The console prints `Ward running → http://0.0.0.0:3000` and a Webview opens. Click **Open in new tab** for the full URL (`https://ward.<username>.repl.co`). Confirm **Load a sample** works.
-
-> `main.py` uses only the Python standard library — nothing to install. It exists to serve the files so the phone install works offline.
-
-### 4. Save to your phone's home screen
-**iPhone/iPad (Safari):** open the URL → **Share** → **Add to Home Screen** → **Add**.
-**Android (Chrome):** open the URL → **⋮** → **Add to Home screen** → **Install**.
-
-After the first online load, the service worker caches the app and it **works offline** thereafter. Free Repls sleep when idle, but once installed and loaded once, the app runs from cache — a sleeping Repl doesn't stop you studying (you only need it awake for the first load and for fresh enrichment).
+> Image lookup (Wikimedia Commons + Openverse) needs **no key** and is always
+> open-licensed. Only the text-generation features use your LLM key.
 
 ---
 
-## Deploy on GitHub (Pages)
+## Plugging in your key (Replit)
 
-Ward is static, so GitHub Pages hosts it directly — great for the offline PWA. The only thing Pages can't do is the optional enrichment button (that needs the Python server; see below).
+1. Upload this folder to a new Replit (or import the repo). Press **Run** once — it
+   serves the app on the web preview.
+2. Open the **Secrets** panel (lock icon) and add secrets to match your key:
 
-1. Create a repo and upload the `studyapp` files to the root (or a `/docs` folder).
-2. Repo **Settings → Pages** → Source: **Deploy from a branch** → pick your branch and `/root` (or `/docs`).
-3. Wait for the green check, then open `https://<username>.github.io/<repo>/`.
-4. Install to your phone's home screen exactly as in the Replit steps above.
+| Your key is from | `PROVIDER` | `API_KEY` | `MODEL` (optional) | `BASE_URL` (optional) |
+|------------------|-----------|-----------|--------------------|------------------------|
+| **Anthropic (Claude)** | `anthropic` | your key | `claude-sonnet-4-6` | — |
+| **OpenAI** | `openai` | your key | `gpt-4o-mini` | — |
+| **OpenRouter** | `openai` | your key | e.g. `anthropic/claude-3.5-sonnet` | `https://openrouter.ai/api/v1` |
+| **Groq** | `openai` | your key | e.g. `llama-3.3-70b-versatile` | `https://api.groq.com/openai/v1` |
+| **Google Gemini** | `gemini` | your key | `gemini-2.5-flash` | — |
+| **Local (Ollama/LM Studio)** | `openai` | any non-empty value | your local model | `http://localhost:11434/v1` |
 
-Everything works on Pages except **+ more practice**. If you want enrichment with a static host, run the enrichment provider separately (any host that can run `main.py`, or a serverless function) and the app will call `/api/enrich`.
+Only `PROVIDER` and `API_KEY` are required; `MODEL` and `BASE_URL` have sensible
+defaults. Press **Run** again after setting secrets.
 
----
+3. Check it took: open `…replit.dev/api/health` — it reports the provider and model,
+   and whether a key is loaded.
 
-## Optional: enrichment with any provider
-
-The **+ more practice** button asks a model for a few extra exam-style questions on a topic. It's the *only* feature that touches the network, and only if you configure it. The provider is pluggable — set environment variables (in Replit: the **Secrets** 🔒 panel).
-
-| Provider | `PROVIDER` | `MODEL` (example) | `API_KEY` | `BASE_URL` (optional) |
-|----------|-----------|-------------------|-----------|-----------------------|
-| Claude (Anthropic) | `anthropic` | `claude-sonnet-4-6` | your Anthropic key | default `https://api.anthropic.com` |
-| OpenAI | `openai` | `gpt-4o-mini` | your OpenAI key | default `https://api.openai.com/v1` |
-| OpenRouter | `openai` | e.g. `anthropic/claude-3.5-sonnet` | your OpenRouter key | `https://openrouter.ai/api/v1` |
-| Groq | `openai` | e.g. `llama-3.3-70b-versatile` | your Groq key | `https://api.groq.com/openai/v1` |
-| Local (Ollama/LM Studio/vLLM) | `openai` | your local model name | any placeholder | e.g. `http://localhost:11434/v1` |
-| Google Gemini | `gemini` | `gemini-2.5-flash` | your Gemini key | default Google endpoint |
-
-Set `PROVIDER`, `MODEL`, and `API_KEY` (a bare `API_KEY` works, or the classic `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`). Anything OpenAI-compatible uses `PROVIDER=openai` with a `BASE_URL`. Press **Run** again; the console shows `Enrichment: ON (provider=…, model=…)`. Check `/api/health` to confirm.
-
-**On NotebookLM:** there's no public consumer API you can drop a key into — Google's only official surface is an *enterprise* API that needs a Google Cloud project, IAM roles, and OAuth tokens, and its outputs are summary/podcast-oriented rather than "answer these exam questions from my notes." So it isn't wired in as a provider. The natural Google option here is the **Gemini API** (`PROVIDER=gemini`), which is a real developer API with a simple key.
-
-Without any of this, enrichment just stays off and nothing else is affected.
+That's it. Add a subject, tap **+ Sbobina**, paste a transcript, and generate.
 
 ---
 
-## Deploy anywhere else
+## Deploying on Render
 
-- **Any static host** (Netlify, Vercel, S3): upload the folder; `index.html` is the entry point. Everything works except enrichment.
-- **Locally with the server:** `python3 main.py`, open `http://localhost:3000`. `PORT` changes the port; provider vars enable enrichment.
-- **Locally without Python:** just open `index.html`.
+Ward's `main.py` already binds `0.0.0.0` and reads Render's `PORT`, so no code
+changes are needed. Two Render-specific files are included: `requirements.txt` (so
+Render detects a Python service — Ward has no dependencies, so it's effectively
+empty) and `render.yaml` (an optional Blueprint). The `.replit` / `replit.nix` files
+are ignored by Render; leave them or delete them.
+
+**Option A — Blueprint (easiest).** Push this folder to a GitHub repo, then in Render:
+**New → Blueprint**, pick the repo. It reads `render.yaml` and creates the service.
+When prompted, paste your key into `API_KEY`, and change `PROVIDER` / `MODEL` if your
+key isn't Anthropic (see the table above).
+
+**Option B — Manual.** **New → Web Service**, connect the repo, then set:
+- **Runtime:** Python
+- **Build command:** `pip install -r requirements.txt`
+- **Start command:** `python main.py`
+- **Environment variables:** the same `PROVIDER` / `API_KEY` / (`MODEL` / `BASE_URL`)
+  from the table above.
+- **Health check path** (optional): `/api/health`
+
+Then **Create Web Service**. When it's live, open `https://<your-app>.onrender.com/api/health`
+to confirm the provider/model and that your key loaded.
+
+**Free-tier note:** Render's free web services spin down after ~15 min idle and take
+~50s to wake on the next visit — normal, not a bug. Generating a long sbobina makes
+several sequential model calls, so give it a moment.
 
 ---
 
-## Markers Ward understands
+## Using it
 
-You don't need these, but if your guide uses them, Ward reads them as signal. `GUIDE-TEMPLATE.md` has the full spec.
+1. **Library → + Subject** to make a folder (e.g. *Medical Psychology*).
+2. Inside the subject:
+   - **+ Guide** — *Build it for me*: paste your **course material** and, in the
+     separate box, your **past exam questions** (one per line; leave blank if none).
+     With questions it answers every one at depth; without, it builds from the material
+     and generates questions. Or choose *I already have one* to import a guide that's
+     already written (pure parsing, no key). See `GUIDE-TEMPLATE.md` for that format.
+   - **+ Sbobina** — fill the header (course, professor, you) + paste the
+     transcript → generates a lecture write-up. Long transcripts are chunked
+     automatically, so there's no upload limit. Figures are sourced open-licensed
+     with a caption + attribution; where nothing suitable is found you get a
+     labelled placeholder.
+   - **+ Cheat sheet** — pick a guide/sbobina (or paste text) → dense one-pager.
+3. Open any item, then **Export PDF** (uses your browser's print → *Save as PDF*).
+   On iPhone: Share → Print → pinch out on the preview → Share → Save to Files.
+4. Open a **guide** to study it: Revise, Practice, Day-before, and spaced-rep Review.
 
-| Marker | Meaning |
-|--------|---------|
-| 🔥 | high-yield / appeared on exams |
-| 🚩 | exam trap (surfaced + in day-before) |
-| 🧠 | mnemonic |
-| ⭐ | key line |
-| 🔑 | key mechanism |
-| `**Qn: …**` | numbered exam question (triggers exam-driven mode) |
-| `> text` | definition |
+Install to your home screen: in the browser's share menu choose **Add to Home
+Screen**. It then opens full-screen and works offline for everything except generation.
 
 ---
 
 ## Files
 
 ```
-studyapp/
-├── index.html          app shell + theme
-├── engine.js           parser + scheduler (logic core, no deps)
-├── app.js              UI controller + IndexedDB storage
-├── samples.js          bundled example guides
-├── service-worker.js   offline caching
-├── manifest.json       PWA manifest
-├── icon-192.png        app icons
-├── icon-512.png
-├── main.py             optional backend (stdlib only, multi-provider)
-├── .replit             Replit run config
-├── replit.nix          Replit environment
-├── GUIDE-TEMPLATE.md   prompt + format for building guides
-└── README.md
+index.html          UI + all styles + PWA shell
+engine.js           guide parser + scheduler (pure logic, no network)
+md.js               tiny markdown -> HTML renderer (sbobine / cheat sheets)
+app.js              subjects, makers, reader, PDF export, study views
+samples.js          two worked-example guides
+service-worker.js   offline cache
+manifest.json       PWA manifest
+icon-192.png/512    icons
+main.py             optional server: /api/guide /api/sbobina /api/cheatsheet
+                    /api/image-search /api/enrich  (+ static hosting)
+.replit / replit.nix  Replit run config (ignored by Render)
+requirements.txt    empty — lets Render detect a Python service
+render.yaml         optional Render Blueprint
+GUIDE-TEMPLATE.md   copy-paste format for structured guides
 ```
 
-No build step. No dependencies. No account required.
+## Notes on images & copyright
+
+Figures come only from **Wikimedia Commons** and **Openverse** (Creative Commons /
+public domain), fetched server-side, with attribution shown under each figure. Ward
+does **not** scrape figures from copyrighted papers or textbooks, so the images are
+topically relevant illustrations rather than the exact figure from a given source.
+
+## NotebookLM?
+
+There's no public consumer NotebookLM API to plug in — only an enterprise Google
+Cloud API. If you want a Google model, use **Gemini** (`PROVIDER=gemini`) above.
+
+## Privacy
+
+Guides, sbobine, cheat sheets and review history live in your browser (IndexedDB).
+The only network calls are: LLM generation you trigger (to your chosen provider) and
+open-licensed image lookups. Nothing is sent anywhere else.

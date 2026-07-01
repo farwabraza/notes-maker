@@ -1,0 +1,21 @@
+# Optional Render Blueprint. Point Render at this repo (New → Blueprint) and it
+# configures the service automatically. You can also skip this and set the same
+# Build/Start commands + env vars by hand in the dashboard.
+services:
+  - type: web
+    name: ward
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # Change PROVIDER/MODEL to match your key (see the table in README).
+      - key: PROVIDER
+        value: anthropic
+      - key: MODEL
+        value: claude-sonnet-4-6
+      # Secret — Render will prompt you for this and never stores it in the repo.
+      - key: API_KEY
+        sync: false

@@ -1,0 +1,3 @@
+# Ward has no third-party dependencies — it runs on the Python standard library only.
+# This file exists so Render (and similar hosts) detect a Python service and run the
+# build step. `pip install -r requirements.txt` against this file is a harmless no-op.

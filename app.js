@@ -46,39 +46,56 @@
     del(k) { try { localStorage.removeItem("ward:" + k); } catch {} },
   };
   let store = DB;           // swapped to LSfallback at boot if IDB fails
+  const uid = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
   // -------- state (populated asynchronously at boot) --------
   const state = {
-    decks: {},               // id -> {model, sr:{cardId:srState}, raw}
-    activeId: null,
+    subjects: {},            // sid -> {id, name, createdAt, items:{iid:item}}
+    activeSubject: null,     // subject folder currently open in Library
+    activeGuideId: null,     // guide item currently being studied
+    openDocId: null,         // sbobina/cheatsheet open in the Reader
     settings: { theme: "dark", reveal: true, claude: false },
-    practice: null,          // active practice session
-    review: null,            // active review session
+    practice: null,
+    review: null,
   };
-  const activeDeck = () => state.decks[state.activeId] || null;
-  const saveDecks = () => store.set("decks", state.decks);
+  const subj = (sid) => state.subjects[sid || state.activeSubject] || null;
+  // find any item by id across subjects
+  function findItem(iid) {
+    for (const s of Object.values(state.subjects)) if (s.items[iid]) return { item: s.items[iid], subject: s };
+    return null;
+  }
+  // the guide being studied — same {model, sr} shape the study views expect
+  const curGuide = () => { const f = findItem(state.activeGuideId); return f && f.item.type === "guide" ? f.item : null; };
+  const activeDeck = curGuide;                    // study views call activeDeck()
+  const saveSubjects = () => store.set("subjects", state.subjects);
+  const saveDecks = saveSubjects;                 // legacy alias used by gradeCard
   const saveSettings = () => store.set("settings", state.settings);
-  const saveActive = () => store.set("active", state.activeId);
+  const saveActive = () => store.set("active", { subject: state.activeSubject, guide: state.activeGuideId });
 
-  // Load persisted state; migrate any old localStorage decks into IndexedDB once.
   async function loadState() {
-    try { await DB.get("decks"); } catch { store = LSfallback; }
+    try { await DB.get("subjects"); } catch { store = LSfallback; }
     const g = async (k, d) => { const v = await store.get(k); return v == null ? d : v; };
-    let decks = await g("decks", null);
-    // one-time migration from the previous localStorage-based version
-    if (decks == null) {
-      try {
-        const old = localStorage.getItem("ward:decks");
-        if (old) {
-          decks = JSON.parse(old);
-          await store.set("decks", decks);
-          const oa = localStorage.getItem("ward:active");
-          if (oa) await store.set("active", JSON.parse(oa));
+    let subjects = await g("subjects", null);
+    if (subjects == null) {
+      // migrate the previous flat "decks" (IndexedDB or legacy localStorage) into a subject
+      let decks = await g("decks", null);
+      if (decks == null) { try { const o = localStorage.getItem("ward:decks"); if (o) decks = JSON.parse(o); } catch {} }
+      subjects = {};
+      if (decks && Object.keys(decks).length) {
+        const sid = uid("s_"), items = {};
+        for (const [id, d] of Object.entries(decks)) {
+          items[id] = Object.assign({ id, type: "guide",
+            title: (d.model && d.model.meta && d.model.meta.title) || "Guide",
+            createdAt: d.createdAt || Date.now() }, d);
         }
-      } catch {}
+        subjects[sid] = { id: sid, name: "Imported", createdAt: Date.now(), items };
+      }
+      await store.set("subjects", subjects);
     }
-    state.decks = decks || {};
-    state.activeId = await g("active", null);
+    state.subjects = subjects || {};
+    const act = await g("active", {});
+    state.activeSubject = (act && act.subject && state.subjects[act.subject]) ? act.subject : (Object.keys(state.subjects)[0] || null);
+    state.activeGuideId = (act && act.guide) || null;
     state.settings = await g("settings", { theme: "dark", reveal: true, claude: false });
   }
 
@@ -91,101 +108,395 @@
   // =====================================================================
   //  Build a deck from text
   // =====================================================================
-  function buildDeck(text, name) {
-    if (!text || text.trim().length < 40) { toast("Not enough text to build a deck."); return; }
+  function buildGuide(text, name) {
+    if (!text || text.trim().length < 40) { toast("Not enough text to build a guide."); return; }
+    const s = subj(); if (!s) { toast("Open a subject first."); return; }
     const model = E.buildModel(text, name ? { title: name } : {});
-    const id = "d_" + Date.now().toString(36);
-    state.decks[id] = { model, sr: {}, createdAt: Date.now(), raw: text };
-    state.activeId = id;
-    saveActive();
-    saveDecks();
-    renderAnalysis(model, true);
+    const id = uid("g_");
+    s.items[id] = { id, type: "guide", title: model.meta.title, createdAt: Date.now(), model, sr: {}, raw: text };
+    state.activeGuideId = id;
+    saveActive(); saveSubjects();
     refreshAll();
     go("revise");
     toast("Built “" + model.meta.title + "” — " + model.mode.replace("-", " "));
   }
 
   // =====================================================================
-  //  SOURCES view
+  //  Shared: API + modal + markdown helpers
   // =====================================================================
-  function renderAnalysis(model, justBuilt) {
-    const s = model.signals;
-    const byType = {};
-    model.cards.forEach((c) => (byType[c.type] = (byType[c.type] || 0) + 1));
-    const order = ["exam", "mcq", "define", "cloze", "trap", "mnemonic", "number", "ref"];
-    const colors = { exam: "var(--amber)", mcq: "var(--cyan)", define: "var(--cyan)",
-      cloze: "var(--violet)", trap: "var(--rose)", mnemonic: "var(--violet)",
-      number: "var(--amber)", ref: "var(--mut)" };
-    const labels = { exam: "Past Qs", mcq: "MCQs", define: "Definitions", cloze: "Fill-ins",
-      trap: "Traps", mnemonic: "Mnemonics", number: "Numbers", ref: "Reference" };
-    const total = model.cards.length || 1;
-    const bars = order.filter((t) => byType[t]).map((t) =>
-      `<i style="width:${(byType[t] / total * 100).toFixed(1)}%;background:${colors[t]}"></i>`).join("");
-    const legend = order.filter((t) => byType[t]).map((t) =>
-      `<span style="--c:${colors[t]}"><i style="background:${colors[t]}"></i>${labels[t]} ${byType[t]}</span>`
-        .replace('<i ', '<em style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle" ')
-        .replace('></i>', '></em>')).join("");
-
-    const isExam = model.mode === "exam-driven";
-    const explain = isExam
-      ? `<b>Past questions detected</b> (${s.examQuestionBlocks} examined questions). Notes were restructured <b>around what professors test</b>: each question is answered at depth, ${s.trapMarkers} exam traps and ${s.mnemonicMarkers} mnemonics were pulled out, and everything is ranked by testing weight.`
-      : `<b>No past questions found</b> — this is lecture/reading material. The engine <b>extracted key concepts and generated situational questions</b>: ${byType.define || 0} definitions, ${byType.cloze || 0} fill-in-the-blanks and ${byType.mcq || 0} MCQs from the material, ranked by the 🔥 heat you marked.`;
-
-    $("#analysisWrap").innerHTML = `
-      <div class="analysis">
-        <h4>${justBuilt ? "✓ Built" : "Analysis"}: ${esc(model.meta.title)}
-          <span class="modechip ${isExam ? "exam" : "concept"}" style="margin-left:6px">${isExam ? "exam-driven" : "concept-driven"}</span>
-        </h4>
-        <p class="tiny mut" style="margin:0 0 4px">${explain}</p>
-        <div class="abar">${bars}</div>
-        <div class="leg">${legend}</div>
-        <div class="tiny mut" style="margin-top:8px">${model.topics.length} topics · ${model.cards.length} study cards generated</div>
-      </div>`;
+  async function api(path, body) {
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+    return data;
   }
+  function openModal(html) { const m = $("#modal"); $("#modalCard").innerHTML = html; m.hidden = false; document.body.style.overflow = "hidden"; }
+  function closeModal() { $("#modal").hidden = true; $("#modalCard").innerHTML = ""; document.body.style.overflow = ""; }
+  function modalBusy(msg, sub) { $("#modalCard").innerHTML = `<div class="busy"><div class="spinner"></div><div class="bmsg">${esc(msg)}</div><div class="tiny mut">${esc(sub || "")}</div></div>`; }
+  const wordCount = (s) => (s.trim().match(/\S+/g) || []).length;
 
-  function renderDeckList() {
-    const ids = Object.keys(state.decks);
-    $("#deckListLabel").hidden = ids.length === 0;
-    $("#deckList").innerHTML = ids.map((id) => {
-      const d = state.decks[id], m = d.model;
-      const active = id === state.activeId;
-      return `<div class="card"><div class="pad" style="display:flex;align-items:center;gap:10px">
-        <div style="flex:1;min-width:0">
-          <div style="font-family:var(--disp);font-weight:700;font-size:15px">${esc(m.meta.title)}</div>
-          <div class="tiny mut">${m.mode.replace("-", " ")} · ${m.topics.length} topics · ${m.cards.length} cards</div>
-        </div>
-        ${active ? '<span class="chip green">active</span>' : `<button class="btn ghost tiny" data-use="${id}">Use</button>`}
-        <button class="iconbtn" data-del="${id}" title="Delete" style="width:32px;height:32px">✕</button>
-      </div></div>`;
-    }).join("");
-    $$("#deckList [data-use]").forEach((b) => b.onclick = () => { state.activeId = b.dataset.use; saveActive(); refreshAll(); toast("Switched deck"); });
-    $$("#deckList [data-del]").forEach((b) => b.onclick = () => {
-      if (!confirm("Delete this deck and its review history?")) return;
-      delete state.decks[b.dataset.del];
-      if (state.activeId === b.dataset.del) state.activeId = Object.keys(state.decks)[0] || null;
-      saveActive(); saveDecks(); refreshAll();
+  // figure tokens {{IMG: query | caption}} -> placeholders + list
+  function extractFigs(md) {
+    const figs = [];
+    const body = (md || "").replace(/\{\{\s*IMG:\s*([\s\S]*?)\}\}/gi, (_, inner) => {
+      const [q, cap] = inner.split("|");
+      figs.push({ query: (q || "").trim(), caption: (cap || q || "").trim(), image: null });
+      return "\n\n@@FIG" + (figs.length - 1) + "@@\n\n";
     });
+    return { body: body.trim(), figs };
+  }
+  function figureHTML(f) {
+    if (!f) return "";
+    if (!f.image) return `<figure class="fig missing"><div class="ph">figure: ${esc(f.caption || f.query)}</div><figcaption>${esc(f.caption || "")} <span class="attrib">— no open-licensed image found</span></figcaption></figure>`;
+    return `<figure class="fig"><img src="${f.image.url}" alt="${esc(f.caption || "")}" loading="lazy"><figcaption>${esc(f.caption || f.image.title || "")} ${f.image.page ? `<a href="${f.image.page}" target="_blank" rel="noopener noreferrer" class="attrib">${esc(f.image.attribution)}</a>` : `<span class="attrib">${esc(f.image.attribution)}</span>`}</figcaption></figure>`;
+  }
+  function sbobinaBodyHTML(item) {
+    let html = window.MD.render(item.markdown || "");
+    html = html.replace(/<p>@@FIG(\d+)@@<\/p>/g, (_, k) => figureHTML((item.figs || [])[+k]));
+    return html;
+  }
+  function docHeaderHTML(m) {
+    m = m || {};
+    const line1 = [m.school, m.course, m.professor ? "Prof. " + m.professor : ""].filter(Boolean).join(" — ");
+    return `<div class="sbhead">
+      ${line1 ? `<div class="sbrow">${esc(line1)}</div>` : ""}
+      ${m.title ? `<h1 class="sbtitle">${esc(m.title)}</h1>` : ""}
+      <div class="sbrow tiny mut">${[m.date, m.author ? "Author: " + m.author : ""].filter(Boolean).map(esc).join(" · ")}</div>
+    </div>`;
   }
 
   // =====================================================================
-  //  Header deck picker
+  //  LIBRARY view — subjects (folders) and their items
+  // =====================================================================
+  function guideMeta(it) { const m = it.model; return `${m.mode.replace("-", " ")} · ${m.topics.length} topics · ${m.cards.length} cards`; }
+  function itemMeta(it) {
+    if (it.type === "guide") return guideMeta(it);
+    if (it.type === "sbobina") return `lecture write-up · ${(it.figs || []).filter((f) => f.image).length} figures`;
+    return "cheat sheet";
+  }
+  function itemRow(it) {
+    const active = it.type === "guide" && it.id === state.activeGuideId;
+    return `<div class="card"><div class="pad itemrow">
+      <div class="imain" data-open="${it.id}">
+        <div class="ititle">${esc(it.title)}${active ? ' <span class="chip green">studying</span>' : ""}</div>
+        <div class="tiny mut">${itemMeta(it)}</div>
+      </div>
+      <button class="iconbtn" data-pdf="${it.id}" title="Export PDF" aria-label="Export PDF">⤓</button>
+      <button class="iconbtn" data-delitem="${it.id}" title="Delete" aria-label="Delete">✕</button>
+    </div></div>`;
+  }
+  function group(label, type, items, addLabel) {
+    const rows = items.map(itemRow).join("");
+    return `<div class="grp">
+      <div class="grphead"><span>${label}</span><button class="btn ghost tiny" data-add="${type}">+ ${addLabel}</button></div>
+      ${rows || `<div class="tiny mut" style="padding:2px 2px 8px">None yet.</div>`}
+    </div>`;
+  }
+  function renderLibrary() {
+    const wrap = $("#libBody");
+    const sids = Object.keys(state.subjects);
+    // subject chips
+    const chips = sids.map((sid) => `<button class="fchip ${sid === state.activeSubject ? "on" : ""}" data-subj="${sid}">${esc(state.subjects[sid].name)}</button>`).join("");
+    let html = `<div class="fchips">${chips}<button class="fchip add" id="newSubjBtn">+ Subject</button></div>`;
+
+    const s = subj();
+    if (!s) {
+      html += `<div class="empty"><div class="big">📁</div><div>Create a subject folder to get started.</div>
+        <div class="tiny mut" style="margin-top:6px">Each subject holds its guides, sbobine and cheat sheets. Delete the whole folder when you're done.</div>
+        <div class="btnrow" style="justify-content:center;margin-top:14px"><button class="btn primary" id="newSubjBtn2">New subject</button> <button class="btn ghost" id="loadSampleBtn">Load a sample</button></div></div>`;
+      wrap.innerHTML = html;
+      $("#newSubjBtn").onclick = $("#newSubjBtn2").onclick = newSubjectPrompt;
+      $("#loadSampleBtn") && ($("#loadSampleBtn").onclick = loadSampleSubject);
+      bindSubjChips();
+      return;
+    }
+    const items = Object.values(s.items).sort((a, b) => b.createdAt - a.createdAt);
+    const guides = items.filter((i) => i.type === "guide");
+    const sbob = items.filter((i) => i.type === "sbobina");
+    const cheat = items.filter((i) => i.type === "cheatsheet");
+    html += `<div class="subjhead">
+      <div class="sname">${esc(s.name)}</div>
+      <button class="btn ghost tiny" id="delSubjBtn">Delete subject</button>
+    </div>`;
+    html += group("Structured guides", "guide", guides, "Guide");
+    html += group("Sbobine (lecture write-ups)", "sbobina", sbob, "Sbobina");
+    html += group("Cheat sheets", "cheatsheet", cheat, "Cheat sheet");
+    wrap.innerHTML = html;
+
+    bindSubjChips();
+    $("#newSubjBtn").onclick = newSubjectPrompt;
+    $("#delSubjBtn").onclick = () => deleteSubject(s.id);
+    $$("#libBody [data-add]").forEach((b) => b.onclick = () => addPrompt(b.dataset.add));
+    $$("#libBody [data-open]").forEach((b) => b.onclick = () => openItem(b.dataset.open));
+    $$("#libBody [data-pdf]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); exportPDF(b.dataset.pdf); });
+    $$("#libBody [data-delitem]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); deleteItem(b.dataset.delitem); });
+  }
+  function bindSubjChips() { $$("#libBody [data-subj]").forEach((b) => b.onclick = () => { state.activeSubject = b.dataset.subj; saveActive(); renderLibrary(); }); }
+
+  function newSubjectPrompt() {
+    openModal(`<h3 class="mtitle">New subject</h3>
+      <input id="subjName" class="input" placeholder="e.g. Medical Psychology" autofocus>
+      <div class="btnrow end"><button class="btn ghost" id="mCancel">Cancel</button><button class="btn primary" id="mOk">Create</button></div>`);
+    $("#mCancel").onclick = closeModal;
+    $("#mOk").onclick = () => { const n = $("#subjName").value.trim(); if (!n) return; const id = uid("s_"); state.subjects[id] = { id, name: n, createdAt: Date.now(), items: {} }; state.activeSubject = id; saveActive(); saveSubjects(); closeModal(); renderLibrary(); };
+    $("#subjName").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#mOk").click(); });
+  }
+  function deleteSubject(sid) {
+    const s = state.subjects[sid]; if (!s) return;
+    if (!confirm(`Delete subject “${s.name}” and everything in it?`)) return;
+    if (Object.keys(s.items).includes(state.activeGuideId)) state.activeGuideId = null;
+    delete state.subjects[sid];
+    if (state.activeSubject === sid) state.activeSubject = Object.keys(state.subjects)[0] || null;
+    saveActive(); saveSubjects(); refreshAll();
+  }
+  function deleteItem(iid) {
+    const f = findItem(iid); if (!f) return;
+    if (!confirm("Delete this item?")) return;
+    delete f.subject.items[iid];
+    if (state.activeGuideId === iid) state.activeGuideId = null;
+    if (state.openDocId === iid) state.openDocId = null;
+    saveActive(); saveSubjects(); renderLibrary(); renderHeader();
+  }
+
+  function openItem(iid) {
+    const f = findItem(iid); if (!f) return;
+    if (f.item.type === "guide") { state.activeGuideId = iid; saveActive(); refreshAll(); go("revise"); }
+    else openReader(iid);
+  }
+
+  // ---- add flows -----------------------------------------------------
+  function addPrompt(type) {
+    if (type === "guide") return addGuidePrompt();
+    if (type === "sbobina") return addSbobinaPrompt();
+    if (type === "cheatsheet") return addCheatsheetPrompt();
+  }
+  function fileField(id, accept) {
+    return `<label class="drop sm" id="${id}drop">Drop a file or tap — <span class="tiny mut">${accept}</span><input type="file" id="${id}" accept="${accept}" hidden></label>`;
+  }
+  function wireFile(id, ta) {
+    const inp = $("#" + id), drop = $("#" + id + "drop");
+    const read = (f) => { if (!f) return; const r = new FileReader(); r.onload = () => { $(ta).value = r.result; }; r.readAsText(f); };
+    drop.onclick = () => inp.click();
+    inp.onchange = () => read(inp.files[0]);
+    ["dragover", "dragenter"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+    ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+    drop.addEventListener("drop", (e) => read(e.dataTransfer.files[0]));
+  }
+  function addGuidePrompt() {
+    openModal(`<h3 class="mtitle">New structured guide</h3>
+      <input id="gName" class="input" placeholder="Guide title *">
+      <div class="seg gmode" id="gModeSeg">
+        <button data-m="generate" class="on">Build it for me</button>
+        <button data-m="import">I already have one</button>
+      </div>
+      <div id="gGen">
+        <textarea id="gMat" class="input ta" placeholder="Course material / lecture notes *  (paste or drop a file)"></textarea>
+        ${fileField("gMatFile", ".md,.txt")}
+        <textarea id="gQs" class="input ta" style="min-height:110px" placeholder="Past exam questions — one per line. Leave blank if there are none."></textarea>
+        <input id="gInstr" class="input" placeholder="Extra instructions (optional) — e.g. 'emphasise management', 'assume Italian oral exam'">
+        <div class="tiny mut">With questions → <b>exam-driven</b>: every question answered at depth (100% coverage). Without → <b>concept-driven</b>: built from your material with questions generated. Uses your key.</div>
+      </div>
+      <div id="gImp" hidden>
+        <textarea id="gText" class="input ta" placeholder="Paste an already-structured guide (e.g. one built earlier)…"></textarea>
+        ${fileField("gImpFile", ".md,.txt")}
+        <div class="tiny mut">Pure logic, no key needed — just parses a guide that's already written.</div>
+      </div>
+      <div class="btnrow end"><button class="btn ghost" id="mCancel">Cancel</button><button class="btn primary" id="mOk">Build</button></div>`);
+    let gmode = "generate";
+    wireFile("gMatFile", "#gMat"); wireFile("gImpFile", "#gText");
+    $$("#gModeSeg button").forEach((b) => b.onclick = () => {
+      gmode = b.dataset.m;
+      $$("#gModeSeg button").forEach((x) => x.classList.toggle("on", x === b));
+      $("#gGen").hidden = gmode !== "generate"; $("#gImp").hidden = gmode !== "import";
+    });
+    $("#mCancel").onclick = closeModal;
+    $("#mOk").onclick = () => {
+      const title = $("#gName").value.trim();
+      if (!title) return toast("Give the guide a title.");
+      if (gmode === "import") {
+        const t = $("#gText").value;
+        if (!t || t.trim().length < 40) return toast("Paste the guide text first.");
+        closeModal(); buildGuide(t, title);
+      } else {
+        const material = $("#gMat").value;
+        if (wordCount(material) < 40) return toast("Add your course material first.");
+        generateGuide(title, material, $("#gQs").value, $("#gInstr").value);
+      }
+    };
+  }
+  async function generateGuide(title, material, questions, instructions) {
+    const exam = (questions || "").trim().length > 0;
+    modalBusy("Building your guide…", exam ? "Answering every past question at depth — this can take a bit." : "Building from your material and generating questions…");
+    try {
+      const { markdown } = await api("/api/guide", { material, questions, instructions, title });
+      const model = E.buildModel(markdown, { title });
+      const id = uid("g_");
+      subj().items[id] = { id, type: "guide", title: model.meta.title || title, createdAt: Date.now(), model, sr: {}, raw: markdown };
+      state.activeGuideId = id; saveActive(); saveSubjects(); closeModal();
+      refreshAll(); go("revise");
+      toast("Built “" + (model.meta.title || title) + "” — " + model.mode.replace("-", " "));
+    } catch (e) { generationError(e, "guide"); }
+  }
+  function addSbobinaPrompt() {
+    openModal(`<h3 class="mtitle">New sbobina — lecture write-up</h3>
+      <div class="grid2">
+        <input id="sbTitle" class="input" placeholder="Lecture title *">
+        <input id="sbDate" class="input" placeholder="Date (e.g. 17/03/2026)">
+        <input id="sbSchool" class="input" placeholder="School / faculty">
+        <input id="sbCourse" class="input" placeholder="Course">
+        <input id="sbProf" class="input" placeholder="Professor">
+        <input id="sbAuthor" class="input" placeholder="Author (you)">
+      </div>
+      <textarea id="sbText" class="input ta" placeholder="Paste the raw transcript or rough lecture notes…"></textarea>
+      ${fileField("sbFile", ".txt,.md,.vtt,.srt")}
+      <div class="tiny mut">Needs the server + an API key. Long transcripts are chunked automatically. Figures are open-licensed (Wikimedia / Openverse).</div>
+      <div class="btnrow end"><button class="btn ghost" id="mCancel">Cancel</button><button class="btn primary" id="mOk">Generate</button></div>`);
+    wireFile("sbFile", "#sbText");
+    $("#mCancel").onclick = closeModal;
+    $("#mOk").onclick = () => {
+      const title = $("#sbTitle").value.trim(), text = $("#sbText").value;
+      if (!title) return toast("Give the lecture a title.");
+      if (wordCount(text) < 40) return toast("Paste the transcript first.");
+      const meta = { title, date: $("#sbDate").value.trim(), school: $("#sbSchool").value.trim(), course: $("#sbCourse").value.trim(), professor: $("#sbProf").value.trim(), author: $("#sbAuthor").value.trim() };
+      generateSbobina(meta, text);
+    };
+  }
+  function addCheatsheetPrompt() {
+    const s = subj(); const src = Object.values(s.items).filter((i) => i.type === "guide" || i.type === "sbobina");
+    const opts = src.map((i) => `<option value="${i.id}">${esc(i.title)} (${i.type})</option>`).join("");
+    openModal(`<h3 class="mtitle">New cheat sheet</h3>
+      <input id="csTitle" class="input" placeholder="Cheat sheet title *">
+      ${src.length ? `<div class="tiny mut" style="margin-bottom:4px">Condense an existing item:</div><select id="csSrc" class="input">${opts}<option value="__paste">— paste my own text —</option></select>` : `<input type="hidden" id="csSrc" value="__paste">`}
+      <textarea id="csText" class="input ta" placeholder="Or paste material to condense…" ${src.length ? "hidden" : ""}></textarea>
+      <div class="tiny mut">Needs the server + an API key. Produces a dense one-pager.</div>
+      <div class="btnrow end"><button class="btn ghost" id="mCancel">Cancel</button><button class="btn primary" id="mOk">Generate</button></div>`);
+    const sel = $("#csSrc"), ta = $("#csText");
+    if (sel && sel.tagName === "SELECT") sel.onchange = () => { ta.hidden = sel.value !== "__paste"; };
+    $("#mCancel").onclick = closeModal;
+    $("#mOk").onclick = () => {
+      const title = $("#csTitle").value.trim(); if (!title) return toast("Give it a title.");
+      let content = "";
+      if (sel && sel.value && sel.value !== "__paste") {
+        const it = s.items[sel.value];
+        content = it.type === "guide" ? it.raw : it.markdown;
+      } else content = ta.value;
+      if (wordCount(content) < 30) return toast("Not enough material to condense.");
+      generateCheatsheet(title, content);
+    };
+  }
+
+  async function generateSbobina(meta, transcript) {
+    modalBusy("Writing up the lecture…", "This can take a moment for long transcripts.");
+    try {
+      const { markdown } = await api("/api/sbobina", { transcript, title: meta.title });
+      const { body, figs } = extractFigs(markdown);
+      for (let k = 0; k < figs.length; k++) {
+        modalBusy("Finding open-licensed figures…", `${k + 1} / ${figs.length}`);
+        try { figs[k].image = (await api("/api/image-search", { query: figs[k].query })).image; } catch { figs[k].image = null; }
+      }
+      const id = uid("b_");
+      subj().items[id] = { id, type: "sbobina", title: meta.title, createdAt: Date.now(), meta, markdown: body, figs };
+      saveSubjects(); closeModal(); openReader(id); renderLibrary();
+    } catch (e) { generationError(e, "sbobina"); }
+  }
+  async function generateCheatsheet(title, content) {
+    modalBusy("Condensing to a cheat sheet…");
+    try {
+      const { markdown } = await api("/api/cheatsheet", { content, title });
+      const id = uid("c_");
+      subj().items[id] = { id, type: "cheatsheet", title, createdAt: Date.now(), markdown };
+      saveSubjects(); closeModal(); openReader(id); renderLibrary();
+    } catch (e) { generationError(e, "cheat sheet"); }
+  }
+  function generationError(e, what) {
+    $("#modalCard").innerHTML = `<h3 class="mtitle">Couldn't generate the ${what}</h3>
+      <div class="tiny mut" style="margin-bottom:8px">${esc(e.message)}</div>
+      <div class="tiny mut">This feature needs the app running on the server (Replit) with an API key set. On GitHub Pages the study features still work, but generation does not. See the README.</div>
+      <div class="btnrow end"><button class="btn primary" id="mClose">OK</button></div>`;
+    $("#mClose").onclick = closeModal;
+  }
+
+  // =====================================================================
+  //  READER view — sbobine & cheat sheets
+  // =====================================================================
+  function openReader(iid) { state.openDocId = iid; go("reader"); }
+  function renderReader() {
+    const f = findItem(state.openDocId);
+    if (!f) return void ($("#readerBody").innerHTML = empty(null, "Nothing open."));
+    const it = f.item;
+    const bodyHTML = it.type === "sbobina"
+      ? docHeaderHTML(it.meta) + `<div class="sbobina">${sbobinaBodyHTML(it)}</div>`
+      : `<div class="cheatsheet"><h1 class="sbtitle">${esc(it.title)}</h1>${window.MD.render(it.markdown || "")}</div>`;
+    $("#readerBody").innerHTML = `
+      <div class="readerbar">
+        <button class="btn ghost tiny" id="backLib">← ${esc(f.subject.name)}</button>
+        <div class="rtitle">${esc(it.title)}</div>
+        <button class="btn tiny" id="pdfBtn">Export PDF</button>
+      </div>
+      <div class="doc">${bodyHTML}</div>`;
+    $("#backLib").onclick = () => { state.openDocId = null; go("library"); };
+    $("#pdfBtn").onclick = () => exportPDF(it.id);
+  }
+
+  // =====================================================================
+  //  PDF export via print
+  // =====================================================================
+  function guideDocHTML(it) {
+    const m = it.model, sheet = E.revisionSheet(m);
+    const secs = sheet.map((t) => {
+      const hooks = t.hooks.map((h) => `<li><b>${esc(stripEmoji(h.label))}</b>${h.body ? " — " + esc(h.body) : ""}</li>`).join("");
+      const traps = t.traps.map((h) => `<li class="tr"><b>🚩 ${esc(stripEmoji(h.label).replace(/EXAM TRAP\s*[—-]?\s*/i, ""))}</b>${h.body ? " — " + esc(h.body) : ""}</li>`).join("");
+      const nums = t.numbers.length ? `<div class="nums">${t.numbers.map((n) => `<span class="numrow">${esc(n.item)} <b>${esc(n.value)}</b></span>`).join("")}</div>` : "";
+      const mcqs = t.mcqs.map((q) => `<div class="qa"><b>${esc(q.q)}</b><div>→ ${esc(q.a)}</div></div>`).join("");
+      return `<section class="tsec"><h2>${t.qid ? t.qid + " · " : ""}${esc(t.title)}${t.heat ? " 🔥" + t.heat : ""}</h2>
+        ${t.definition ? `<p class="def">${esc(t.definition)}</p>` : ""}
+        ${hooks ? `<ul>${hooks}</ul>` : ""}${traps ? `<ul>${traps}</ul>` : ""}${nums}${mcqs}</section>`;
+    }).join("");
+    return `<h1 class="sbtitle">${esc(m.meta.title)}</h1><div class="tiny mut">${m.mode.replace("-", " ")} · ${m.topics.length} topics</div>${secs}`;
+  }
+  function exportPDF(iid) {
+    const f = findItem(iid); if (!f) return; const it = f.item;
+    let html;
+    if (it.type === "sbobina") html = `<div class="sbobina">${docHeaderHTML(it.meta)}${sbobinaBodyHTML(it)}</div>`;
+    else if (it.type === "cheatsheet") html = `<div class="cheatsheet"><h1 class="sbtitle">${esc(it.title)}</h1>${window.MD.render(it.markdown || "")}</div>`;
+    else html = `<div class="guidedoc">${guideDocHTML(it)}</div>`;
+    $("#printRoot").innerHTML = `<div class="printinner">${html}</div>`;
+    document.body.classList.add("printing");
+    const done = () => { document.body.classList.remove("printing"); $("#printRoot").innerHTML = ""; window.removeEventListener("afterprint", done); };
+    window.addEventListener("afterprint", done);
+    setTimeout(() => window.print(), 60);
+    setTimeout(done, 2000);
+  }
+
+  function loadSampleSubject() {
+    const id = uid("s_"); state.subjects[id] = { id, name: "Samples", createdAt: Date.now(), items: {} };
+    state.activeSubject = id;
+    ["neuropsychology", "nephrology"].forEach((k) => {
+      const s = window.SAMPLES && window.SAMPLES[k]; if (!s) return;
+      const model = E.buildModel(s.text, { title: s.title });
+      const gid = uid("g_");
+      state.subjects[id].items[gid] = { id: gid, type: "guide", title: model.meta.title, createdAt: Date.now(), model, sr: {}, raw: s.text };
+    });
+    saveActive(); saveSubjects(); renderLibrary(); toast("Loaded two sample guides.");
+  }
+
+  // =====================================================================
+  //  Header (subject / guide context)
   // =====================================================================
   function renderHeader() {
-    const ids = Object.keys(state.decks);
-    $("#deckbar").hidden = ids.length === 0;
-    if (!ids.length) return;
-    $("#deckPick").innerHTML = ids.map((id) =>
-      `<option value="${id}" ${id === state.activeId ? "selected" : ""}>${esc(state.decks[id].model.meta.title)}</option>`).join("");
-    const d = activeDeck();
-    if (!d) return;
-    const chip = $("#modeChip");
-    const isExam = d.model.mode === "exam-driven";
+    const s = subj();
+    const guides = s ? Object.values(s.items).filter((i) => i.type === "guide") : [];
+    $("#deckbar").hidden = guides.length === 0;
+    if (!guides.length) return;
+    $("#deckPick").innerHTML = guides.map((g) => `<option value="${g.id}" ${g.id === state.activeGuideId ? "selected" : ""}>${esc(g.title)}</option>`).join("");
+    const d = curGuide();
+    if (!d) { $("#miniStat").innerHTML = ""; $("#modeChip").textContent = ""; $("#dueBadge").hidden = true; return; }
+    const chip = $("#modeChip"); const isExam = d.model.mode === "exam-driven";
     chip.className = "modechip " + (isExam ? "exam" : "concept");
     chip.textContent = isExam ? "exam-driven" : "concept-driven";
     const st = E.srStats(d.model, d.sr);
     $("#miniStat").innerHTML = `<b>${d.model.cards.length}</b> cards · <b>${st.due}</b> due`;
-    const badge = $("#dueBadge");
-    badge.hidden = st.due === 0; badge.textContent = st.due;
+    const badge = $("#dueBadge"); badge.hidden = st.due === 0; badge.textContent = st.due;
   }
 
   // =====================================================================
@@ -378,7 +689,7 @@
   const cardTag = (c) => { const d = activeDeck(); const t = d && d.model.topics.find((x) => x.id === c.topicId); return t ? esc(t.title.slice(0, 40)) : ""; };
   const stripEmoji = (s) => (s || "").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\uFE0F\u{1F900}-\u{1F9FF}]/gu, "").trim();
 
-  function empty(sel, msg) { const el = sel ? $(sel) : null; const html = `<div class="empty"><div class="big">◔</div><div>${msg}</div><div class="btnrow" style="justify-content:center;margin-top:12px"><button class="btn" onclick="location.hash='#sources'">Go to Sources</button></div></div>`; if (el) el.innerHTML = html; return html; }
+  function empty(sel, msg) { const el = sel ? $(sel) : null; const html = `<div class="empty"><div class="big">◔</div><div>${msg}</div><div class="btnrow" style="justify-content:center;margin-top:12px"><button class="btn" onclick="location.hash='#library'">Go to Library</button></div></div>`; if (el) el.innerHTML = html; return html; }
 
   // =====================================================================
   //  Optional Claude enrichment (needs server + key; see README)
@@ -407,19 +718,21 @@
   // =====================================================================
   //  Navigation + wiring
   // =====================================================================
-  const VIEWS = ["sources", "revise", "practice", "daybefore", "review", "settings"];
+  const VIEWS = ["library", "revise", "practice", "daybefore", "review", "reader", "settings"];
+  const TABS = ["library", "revise", "practice", "daybefore", "review"];
   function go(v) {
-    if (!VIEWS.includes(v)) v = "sources";
+    if (!VIEWS.includes(v)) v = "library";
     $$(".view").forEach((s) => s.classList.remove("active"));
     $("#view-" + v).classList.add("active");
-    $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === v));
+    // reader/settings aren't bottom tabs; keep library highlighted for reader
+    const tabFor = v === "reader" ? "library" : v;
+    $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === tabFor));
     if (location.hash !== "#" + v) history.replaceState(null, "", "#" + v);
     window.scrollTo(0, 0);
-    ({ revise: renderRevise, practice: renderPractice, daybefore: renderDayBefore, review: renderReview, sources: renderSources }[v] || (() => {}))();
+    ({ library: renderLibrary, revise: renderRevise, practice: renderPractice, daybefore: renderDayBefore, review: renderReview, reader: renderReader }[v] || (() => {}))();
   }
-  function renderSources() { renderDeckList(); const d = activeDeck(); if (d && !$("#analysisWrap").innerHTML) renderAnalysis(d.model); }
 
-  function refreshAll() { renderHeader(); const cur = (location.hash || "#sources").slice(1); go(VIEWS.includes(cur) ? cur : "sources"); renderDeckList(); }
+  function refreshAll() { renderHeader(); const cur = (location.hash || "#library").slice(1); go(VIEWS.includes(cur) ? cur : "library"); }
 
   // toast
   let toastT;
@@ -433,44 +746,26 @@
 
   function init() {
     applyTheme();
-    // tabs
     $$(".tab").forEach((t) => t.onclick = () => go(t.dataset.view));
-    window.addEventListener("hashchange", () => go((location.hash || "#sources").slice(1)));
+    window.addEventListener("hashchange", () => go((location.hash || "#library").slice(1)));
     $("#themeBtn").onclick = () => { state.settings.theme = state.settings.theme === "dark" ? "light" : "dark"; saveSettings(); applyTheme(); };
+    $("#modalBack") && ($("#modalBack").onclick = closeModal);
 
-    // samples
-    $$(".samplecard").forEach((c) => c.onclick = () => {
-      const s = window.SAMPLES[c.dataset.sample];
-      if (!s) return toast("Sample unavailable.");
-      buildDeck(s.text, s.title);
-    });
-    // build
-    $("#buildBtn").onclick = () => buildDeck($("#paste").value, $("#deckName").value.trim());
-    // file upload / drop
-    const drop = $("#drop"), file = $("#file");
-    drop.onclick = () => file.click();
-    file.onchange = () => { const f = file.files[0]; if (f) readFile(f); };
-    ["dragover", "dragenter"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
-    ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
-    drop.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) readFile(f); });
-    function readFile(f) { const r = new FileReader(); r.onload = () => { $("#paste").value = r.result; $("#deckName").value = f.name.replace(/\.[^.]+$/, ""); toast("Loaded " + f.name + " — press Build."); }; r.readAsText(f); }
-
-    // header deck pick
-    $("#deckPick").onchange = (e) => { state.activeId = e.target.value; saveActive(); refreshAll(); };
+    // header guide picker
+    $("#deckPick").onchange = (e) => { state.activeGuideId = e.target.value; saveActive(); refreshAll(); };
 
     // settings toggles
     const setTog = (id, key, after) => { const el = $(id); el.classList.toggle("on", !!state.settings[key]); el.onclick = () => { state.settings[key] = !state.settings[key]; el.classList.toggle("on", state.settings[key]); saveSettings(); after && after(); }; };
     setTog("#tgReveal", "reveal");
     setTog("#tgClaude", "claude", () => { if (state.settings.claude) toast("Enrichment on — needs the app on a server with an API key (see README)."); renderRevise(); });
     $("#tgTheme").onclick = () => { state.settings.theme = state.settings.theme === "dark" ? "light" : "dark"; saveSettings(); applyTheme(); };
-    $("#exportBtn").onclick = () => { const blob = new Blob([JSON.stringify(state.decks, null, 2)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "ward-decks.json"; a.click(); };
-    $("#resetBtn").onclick = () => { if (confirm("Delete ALL decks, review history and settings?")) { store.del("decks"); store.del("active"); store.del("settings"); setTimeout(() => location.reload(), 60); } };
+    $("#exportBtn").onclick = () => { const blob = new Blob([JSON.stringify(state.subjects, null, 2)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "ward-subjects.json"; a.click(); };
+    $("#resetBtn").onclick = () => { if (confirm("Delete ALL subjects, guides, sbobine, cheat sheets and review history?")) { store.del("subjects"); store.del("active"); store.del("settings"); store.del("decks"); setTimeout(() => location.reload(), 60); } };
 
-    // service worker (offline)
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("service-worker.js").catch(() => {});
 
     refreshAll();
-    if (!Object.keys(state.decks).length) go("sources");
+    if (!location.hash) go("library");
   }
 
   async function boot() {

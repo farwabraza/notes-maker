@@ -1,6 +1,13 @@
 # Building a Ward-ready study guide
 
-Ward doesn't generate the guide — it restructures a finished guide into study machinery (revision sheet, day-before cut, practice cards, spaced repetition). The synthesis step — turning *questions + notes* into a professor-weighted guide — happens in a Claude chat. This file gives you (1) a prompt to produce that guide and (2) the exact format that makes Ward parse it best.
+Ward now **authors the guide for you** inside the app: **+ Guide → Build it for me**,
+paste your material and (optionally) your past questions, and it calls your API key to
+produce a 100%-coverage guide — answering every past question at depth (exam-driven),
+or building from the material and generating questions (concept-driven).
+
+You only need this file if you want to **import a guide that's already written** (the
+*I already have one* option, which just parses — no key), or to understand the exact
+markdown the maker emits and that Ward parses best. Everything below is that format.
 
 ---
 
