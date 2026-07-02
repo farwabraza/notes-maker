@@ -55,6 +55,7 @@
     activeGuideId: null,     // guide item currently being studied
     openDocId: null,         // sbobina/cheatsheet open in the Reader
     settings: { theme: "dark", reveal: true, claude: false },
+    chats: { guide: [], sbobina: [], cheat: [] },   // maker-tab chat history
     practice: null,
     review: null,
   };
@@ -70,6 +71,7 @@
   const saveSubjects = () => store.set("subjects", state.subjects);
   const saveDecks = saveSubjects;                 // legacy alias used by gradeCard
   const saveSettings = () => store.set("settings", state.settings);
+  const saveChats = () => store.set("chats", state.chats);
   const saveActive = () => store.set("active", { subject: state.activeSubject, guide: state.activeGuideId });
 
   async function loadState() {
@@ -97,6 +99,10 @@
     state.activeSubject = (act && act.subject && state.subjects[act.subject]) ? act.subject : (Object.keys(state.subjects)[0] || null);
     state.activeGuideId = (act && act.guide) || null;
     state.settings = await g("settings", { theme: "dark", reveal: true, claude: false });
+    const chats = await g("chats", null);
+    if (chats) state.chats = Object.assign({ guide: [], sbobina: [], cheat: [] }, chats);
+    // drop busy bubbles left over from a closed tab mid-generation
+    Object.values(state.chats).forEach((log) => { for (let i = log.length - 1; i >= 0; i--) if (log[i].busy) log.splice(i, 1); });
   }
 
   // -------- theme --------
@@ -417,6 +423,214 @@
   }
 
   // =====================================================================
+  //  MAKER TABS — chat-style creators (Guide / Sbobina / Cheat sheet)
+  // =====================================================================
+  const composers = {
+    guide: { files: [], busy: false },
+    sbobina: { files: [], busy: false },
+    cheat: { files: [], busy: false, src: "" },
+  };
+  const GREETING = {
+    guide: "Hey! Attach your past questions and notes below (tap a chip to flip 📚 material / ❓ questions), then tell me what you need — e.g. “make a 100% coverage guide for the oral exam” — and I'll build the structured guide.",
+    sbobina: "Drop one lecture's transcript or rough notes and I'll write it up as a clean sbobina with figures. Add any instructions in the message.",
+    cheat: "Pick a guide or sbobina to condense — or attach/paste material — tell me about the exam, and I'll make the one-pager.",
+  };
+  const HINT = {
+    guide: "With ❓ questions → exam-driven 100% coverage · without → concept-driven from your notes",
+    sbobina: "One lecture per sbobina · .txt .md .vtt .srt · long transcripts are chunked automatically",
+    cheat: "Dense one-pager: Numbers, Don't-confuse, mnemonics · see also the Day-before digest above",
+  };
+  const guessKind = (name) => /quest|exam|paper|domand/i.test(name) ? "questions" : "material";
+  const baseName = (n) => (n || "").replace(/\.[^.]+$/, "");
+
+  function ensureSubject() {
+    if (subj()) return subj();
+    const id = uid("s_");
+    state.subjects[id] = { id, name: "My subject", createdAt: Date.now(), items: {} };
+    state.activeSubject = id; saveActive(); saveSubjects();
+    return state.subjects[id];
+  }
+  function deriveTitle(text, files) {
+    const q = (text || "").match(/(?:titled?|title:|called)\s*[“"']?([^”"'\n.,;]{3,80})/i);
+    if (q) return q[1].trim();
+    if (files.length) return baseName(files[0].name);
+    const w = (text || "").split(/\s+/).filter(Boolean).slice(0, 6).join(" ");
+    return w.length > 3 ? w : "Untitled " + new Date().toLocaleDateString();
+  }
+
+  function pushMsg(kind, m) {
+    const log = state.chats[kind];
+    log.push(m);
+    if (log.length > 60) log.splice(0, log.length - 60);
+    saveChats(); renderChatLog(kind);
+  }
+  function botBusy(kind, text) {
+    const log = state.chats[kind];
+    if (log.length && log[log.length - 1].busy) log[log.length - 1].text = text;
+    else log.push({ role: "bot", busy: true, text });
+    renderChatLog(kind);
+  }
+  function botReplace(kind, msg) {
+    const log = state.chats[kind];
+    if (log.length && log[log.length - 1].busy) log[log.length - 1] = msg; else log.push(msg);
+    saveChats(); renderChatLog(kind);
+  }
+
+  function chatMsgHTML(m) {
+    const files = (m.files || []).length ? `<div class="fchiprow">${m.files.map((f) => `<span class="filechip">📄 ${esc(f)}</span>`).join("")}</div>` : "";
+    if (m.busy) return `<div class="msg bot"><span class="spinner"></span>${esc(m.text)}</div>`;
+    if (m.role === "user") return `<div class="msg user">${esc(m.text)}${files}</div>`;
+    const found = m.item && findItem(m.item);
+    const open = found ? `<div class="btnrow"><button class="btn tiny primary" data-openchat="${m.item}">Open</button><button class="btn ghost tiny" data-pdfchat="${m.item}">PDF</button></div>` : "";
+    return `<div class="msg bot ${m.error ? "err" : ""}">${esc(m.text)}${files}${open}</div>`;
+  }
+  function renderChatLog(kind) {
+    const el = $("#" + kind + "Chat"); if (!el) return;
+    const log = state.chats[kind];
+    el.innerHTML = (log.length ? log.map(chatMsgHTML).join("") : `<div class="msg bot">${esc(GREETING[kind])}</div>`);
+    $$("[data-openchat]", el).forEach((b) => b.onclick = () => openItem(b.dataset.openchat));
+    $$("[data-pdfchat]", el).forEach((b) => b.onclick = () => exportPDF(b.dataset.pdfchat));
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+
+  function renderComposer(kind) {
+    const el = $("#" + kind + "Composer"); if (!el) return;
+    const c = composers[kind];
+    const prevMsg = $("#" + kind + "Msg") ? $("#" + kind + "Msg").value : "";
+    const chips = c.files.map((f, i) =>
+      `<span class="filechip">${kind === "guide" ? `<button class="ftype" data-ft="${i}">${f.kind === "questions" ? "❓ questions" : "📚 material"}</button>` : "📄"} ${esc(f.name)} <button class="fx" data-fx="${i}" aria-label="Remove">✕</button></span>`).join("");
+    let src = "";
+    if (kind === "cheat") {
+      const s = subj();
+      const items = s ? Object.values(s.items).filter((i) => i.type === "guide" || i.type === "sbobina") : [];
+      src = `<select id="cheatSrc" class="input srcpick">
+        <option value="">Source: attached / pasted material</option>
+        ${items.map((i) => `<option value="${i.id}" ${c.src === i.id ? "selected" : ""}>Condense: ${esc(i.title)} (${i.type})</option>`).join("")}</select>`;
+    }
+    const ph = {
+      guide: "e.g. “I uploaded past questions and my summaries — make a 100% coverage guide for the exam.”",
+      sbobina: "e.g. “I uploaded the lecture notes — make the sbobina. Title: Renal physiology.”",
+      cheat: "e.g. “Quick review cheat sheet for tomorrow's exam.”",
+    }[kind];
+    el.innerHTML = `${src}
+      ${chips ? `<div class="chips">${chips}</div>` : ""}
+      <div class="row2">
+        <button class="iconbtn" id="${kind}Attach" title="Attach files" aria-label="Attach files">📎</button>
+        <textarea id="${kind}Msg" class="input" placeholder="${ph}"></textarea>
+        <button class="btn primary" id="${kind}Send" ${c.busy ? "disabled" : ""}>${c.busy ? "…" : "Send"}</button>
+      </div>
+      <input type="file" id="${kind}Files" accept=".md,.txt,.vtt,.srt" multiple hidden>
+      <div class="tiny mut hint">${HINT[kind]} · saves into <b>${esc((subj() || { name: "a new subject" }).name)}</b></div>`;
+    $("#" + kind + "Msg").value = prevMsg;
+    const inp = $("#" + kind + "Files");
+    $("#" + kind + "Attach").onclick = () => inp.click();
+    inp.onchange = () => {
+      Array.from(inp.files).forEach((f) => {
+        const r = new FileReader();
+        r.onload = () => { c.files.push({ name: f.name, text: String(r.result), kind: guessKind(f.name) }); renderComposer(kind); };
+        r.readAsText(f);
+      });
+      inp.value = "";
+    };
+    $$("[data-fx]", el).forEach((b) => b.onclick = () => { c.files.splice(+b.dataset.fx, 1); renderComposer(kind); });
+    $$("[data-ft]", el).forEach((b) => b.onclick = () => { const f = c.files[+b.dataset.ft]; f.kind = f.kind === "questions" ? "material" : "questions"; renderComposer(kind); });
+    const sel = $("#cheatSrc"); if (sel) sel.onchange = () => { c.src = sel.value; };
+    const ta = $("#" + kind + "Msg");
+    ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#" + kind + "Send").click(); } });
+    $("#" + kind + "Send").onclick = () => sendMaker(kind);
+  }
+
+  async function sendMaker(kind) {
+    const c = composers[kind]; if (c.busy) return;
+    const ta = $("#" + kind + "Msg");
+    const text = ((ta && ta.value) || "").trim();
+    if (!text && !c.files.length && !(kind === "cheat" && c.src)) return;
+    ensureSubject();
+    pushMsg(kind, { role: "user", text: text || "(files attached)", files: c.files.map((f) => f.name) });
+    const files = c.files.slice(); c.files = [];
+    if (ta) ta.value = "";
+    c.busy = true; renderComposer(kind);
+    try {
+      if (kind === "guide") await makeGuideFromChat(text, files);
+      else if (kind === "sbobina") await makeSbobinaFromChat(text, files);
+      else await makeCheatFromChat(text, files);
+    } catch (e) {
+      const hint = /key|http|5\d\d|4\d\d/i.test(String(e.message)) ? " (the server needs PROVIDER + API_KEY set — see README)" : "";
+      botReplace(kind, { role: "bot", error: true, text: String(e.message) + hint });
+    }
+    c.busy = false; renderComposer(kind);
+    renderHeader();
+  }
+
+  async function makeGuideFromChat(text, files) {
+    const matFiles = files.filter((f) => f.kind !== "questions");
+    const qFiles = files.filter((f) => f.kind === "questions");
+    let material = matFiles.map((f) => f.text).join("\n\n");
+    const questions = qFiles.map((f) => f.text).join("\n");
+    let instructions = text;
+    if (wordCount(material) < 40 && wordCount(text) > 120) { material = text; instructions = ""; }
+    if (wordCount(material) < 40 && !questions.trim()) throw new Error("Attach your notes / course material first (📎), or paste them into the message.");
+    if (wordCount(material) < 40) material = questions;
+    const title = deriveTitle(text, matFiles.length ? matFiles : files);
+    botBusy("guide", questions.trim() ? "Building your guide — answering every past question at depth. This can take a bit…" : "Building your guide from the material and generating practice questions…");
+    const { markdown } = await api("/api/guide", { material, questions, instructions, title });
+    const model = E.buildModel(markdown, { title });
+    const id = uid("g_");
+    subj().items[id] = { id, type: "guide", title: model.meta.title || title, createdAt: Date.now(), model, sr: {}, raw: markdown };
+    state.activeGuideId = id; saveActive(); saveSubjects();
+    botReplace("guide", { role: "bot", text: `Done — “${model.meta.title || title}” (${model.mode.replace("-", " ")} · ${model.topics.length} topics · ${model.cards.length} cards). It's in your library and live in Cards + Review.`, item: id });
+  }
+
+  async function makeSbobinaFromChat(text, files) {
+    let transcript = files.map((f) => f.text).join("\n\n");
+    let instructions = text;
+    if (wordCount(transcript) < 40 && wordCount(text) > 120) { transcript = text; instructions = ""; }
+    if (wordCount(transcript) < 40) throw new Error("Attach the lecture transcript / notes first (📎), or paste them into the message.");
+    const title = deriveTitle(text, files);
+    botBusy("sbobina", "Writing up the lecture…");
+    const { markdown } = await api("/api/sbobina", { transcript, title, instructions });
+    const { body, figs } = extractFigs(markdown);
+    for (let k = 0; k < figs.length; k++) {
+      botBusy("sbobina", `Finding open-licensed figures… ${k + 1} / ${figs.length}`);
+      try { figs[k].image = (await api("/api/image-search", { query: figs[k].query })).image; } catch { figs[k].image = null; }
+    }
+    const id = uid("b_");
+    subj().items[id] = { id, type: "sbobina", title, createdAt: Date.now(), meta: { title }, markdown: body, figs };
+    saveSubjects();
+    botReplace("sbobina", { role: "bot", text: `Done — “${title}” is written up (${figs.filter((f) => f.image).length} figures found). Open it to read or export the PDF.`, item: id });
+  }
+
+  async function makeCheatFromChat(text, files) {
+    const s = subj();
+    let content = "", title = "";
+    if (composers.cheat.src && s && s.items[composers.cheat.src]) {
+      const it = s.items[composers.cheat.src];
+      content = it.type === "guide" ? it.raw : it.markdown;
+      title = it.title + " — cheat sheet";
+    } else {
+      content = files.map((f) => f.text).join("\n\n");
+      if (wordCount(content) < 30 && wordCount(text) > 120) content = text;
+      title = deriveTitle(text, files);
+    }
+    if (wordCount(content) < 30) throw new Error("Pick a guide/sbobina to condense from the dropdown, or attach/paste the material.");
+    botBusy("cheat", "Condensing to a one-pager…");
+    const { markdown } = await api("/api/cheatsheet", { content, title, instructions: text });
+    const id = uid("c_");
+    subj().items[id] = { id, type: "cheatsheet", title, createdAt: Date.now(), markdown };
+    saveSubjects();
+    botReplace("cheat", { role: "bot", text: `Done — “${title}” is ready. Open it, or export the PDF to print for tomorrow.`, item: id });
+  }
+
+  function renderMaker(kind) {
+    if (kind === "cheat") {
+      $("#cheatTools").innerHTML = `<button class="btn ghost tiny" id="dayBtn">⚡ Day-before digest — hot topics, traps, numbers</button>`;
+      $("#dayBtn").onclick = () => go("daybefore");
+    }
+    renderChatLog(kind);
+    renderComposer(kind);
+  }
+
+  // =====================================================================
   //  READER view — sbobine & cheat sheets
   // =====================================================================
   function openReader(iid) { state.openDocId = iid; go("reader"); }
@@ -476,8 +690,9 @@
       const model = E.buildModel(s.text, { title: s.title });
       const gid = uid("g_");
       state.subjects[id].items[gid] = { id: gid, type: "guide", title: model.meta.title, createdAt: Date.now(), model, sr: {}, raw: s.text };
+      if (!state.activeGuideId) state.activeGuideId = gid;
     });
-    saveActive(); saveSubjects(); renderLibrary(); toast("Loaded two sample guides.");
+    saveActive(); saveSubjects(); renderLibrary(); renderHeader(); toast("Loaded two sample guides.");
   }
 
   // =====================================================================
@@ -505,7 +720,7 @@
   let reviseFilter = "all";
   function renderRevise() {
     const d = activeDeck();
-    if (!d) return empty("#reviseBody", "Build or load a deck first.");
+    if (!d) return empty("#reviseBody", "No guide yet — the Guide tab builds one from your notes and past questions.");
     const isExam = d.model.mode === "exam-driven";
     $("#reviseSub").textContent = isExam
       ? "Every examined question, answered at depth — ordered by testing weight."
@@ -566,14 +781,16 @@
   }
   function renderPractice() {
     const d = activeDeck();
-    if (!d) return empty("#practiceBody", "Build or load a deck first.");
+    if (!d) return empty("#practiceBody", "No guide yet — the Guide tab builds one from your notes and past questions.");
     const typeOpts = [["all", "All"], ["exam", "Past Qs"], ["mcq", "MCQs"], ["define", "Definitions"], ["trap", "Traps"], ["number", "Numbers"], ["mnemonic", "Mnemonics"]];
     const present = new Set(d.model.cards.map((c) => c.type));
     $("#practiceTools").innerHTML = `
       <div class="seg">${["priority", "shuffle"].map((o) => `<button data-o="${o}" class="${practiceOrder === o ? "on" : ""}">${o === "priority" ? "High-yield first" : "Shuffle"}</button>`).join("")}</div>
-      <div class="seg">${typeOpts.filter(([t]) => t === "all" || present.has(t)).map(([t, l]) => `<button data-t="${t}" class="${practiceType === t ? "on" : ""}">${l}</button>`).join("")}</div>`;
+      <div class="seg">${typeOpts.filter(([t]) => t === "all" || present.has(t)).map(([t, l]) => `<button data-t="${t}" class="${practiceType === t ? "on" : ""}">${l}</button>`).join("")}</div>
+      <button class="btn ghost tiny" id="topicSheetBtn">Topic sheet →</button>`;
     $$("#practiceTools [data-o]").forEach((b) => b.onclick = () => { practiceOrder = b.dataset.o; startPractice(); });
     $$("#practiceTools [data-t]").forEach((b) => b.onclick = () => { practiceType = b.dataset.t; startPractice(); });
+    $("#topicSheetBtn").onclick = () => go("revise");
 
     const p = state.practice;
     if (!p || p.i >= p.cards.length) {
@@ -606,7 +823,7 @@
   // =====================================================================
   function renderReview() {
     const d = activeDeck();
-    if (!d) { $("#srStats").innerHTML = ""; return empty("#reviewBody", "Build or load a deck first."); }
+    if (!d) { $("#srStats").innerHTML = ""; return empty("#reviewBody", "No guide yet — the Guide tab builds one from your notes and past questions."); }
     const st = E.srStats(d.model, d.sr);
     $("#srStats").innerHTML = [
       ["due", st.due, "Due now"], ["new", st.new, "New"], ["learn", st.learning, "Learning"], ["mature", st.mature, "Mature"],
@@ -644,7 +861,7 @@
   // =====================================================================
   function renderDayBefore() {
     const d = activeDeck();
-    if (!d) return empty("#dayBody", "Build or load a deck first.");
+    if (!d) return empty("#dayBody", "No guide yet — the Guide tab builds one from your notes and past questions.");
     const db = E.dayBefore(d.model);
     const hot = db.hotTopics.map((t) =>
       `<div class="card"><div class="spined"><div class="spine s5"><i style="height:100%"></i></div>
@@ -689,7 +906,7 @@
   const cardTag = (c) => { const d = activeDeck(); const t = d && d.model.topics.find((x) => x.id === c.topicId); return t ? esc(t.title.slice(0, 40)) : ""; };
   const stripEmoji = (s) => (s || "").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\uFE0F\u{1F900}-\u{1F9FF}]/gu, "").trim();
 
-  function empty(sel, msg) { const el = sel ? $(sel) : null; const html = `<div class="empty"><div class="big">◔</div><div>${msg}</div><div class="btnrow" style="justify-content:center;margin-top:12px"><button class="btn" onclick="location.hash='#library'">Go to Library</button></div></div>`; if (el) el.innerHTML = html; return html; }
+  function empty(sel, msg) { const el = sel ? $(sel) : null; const html = `<div class="empty"><div class="big">◔</div><div>${msg}</div><div class="btnrow" style="justify-content:center;margin-top:12px"><button class="btn primary" onclick="location.hash='#guide'">Make a guide</button> <button class="btn ghost" onclick="location.hash='#library'">Library</button></div></div>`; if (el) el.innerHTML = html; return html; }
 
   // =====================================================================
   //  Optional Claude enrichment (needs server + key; see README)
@@ -718,18 +935,19 @@
   // =====================================================================
   //  Navigation + wiring
   // =====================================================================
-  const VIEWS = ["library", "revise", "practice", "daybefore", "review", "reader", "settings"];
-  const TABS = ["library", "revise", "practice", "daybefore", "review"];
+  const VIEWS = ["library", "guide", "sbobina", "cheat", "revise", "practice", "daybefore", "review", "reader", "settings"];
+  const TABS = ["library", "guide", "sbobina", "cheat", "practice", "review"];
   function go(v) {
     if (!VIEWS.includes(v)) v = "library";
     $$(".view").forEach((s) => s.classList.remove("active"));
     $("#view-" + v).classList.add("active");
-    // reader/settings aren't bottom tabs; keep library highlighted for reader
-    const tabFor = v === "reader" ? "library" : v;
+    // non-tab views highlight the tab they belong to
+    const tabFor = { reader: "library", settings: "library", revise: "practice", daybefore: "cheat" }[v] || v;
     $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === tabFor));
     if (location.hash !== "#" + v) history.replaceState(null, "", "#" + v);
     window.scrollTo(0, 0);
-    ({ library: renderLibrary, revise: renderRevise, practice: renderPractice, daybefore: renderDayBefore, review: renderReview, reader: renderReader }[v] || (() => {}))();
+    ({ library: renderLibrary, guide: () => renderMaker("guide"), sbobina: () => renderMaker("sbobina"), cheat: () => renderMaker("cheat"),
+       revise: renderRevise, practice: renderPractice, daybefore: renderDayBefore, review: renderReview, reader: renderReader }[v] || (() => {}))();
   }
 
   function refreshAll() { renderHeader(); const cur = (location.hash || "#library").slice(1); go(VIEWS.includes(cur) ? cur : "library"); }

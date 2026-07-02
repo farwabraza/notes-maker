@@ -173,9 +173,11 @@ def _chunk(text, size=11000):
     return chunks or [text]
 
 
-def make_sbobina(transcript, title="this lecture"):
+def make_sbobina(transcript, title="this lecture", instructions=""):
     """Return markdown body (with {{IMG:...}} slots). Chunks long transcripts."""
     chunks = _chunk(transcript)
+    extra = (f"\nAlso follow these instructions from the student: {instructions.strip()}"
+             if (instructions or "").strip() else "")
     parts = []
     for i, ch in enumerate(chunks):
         pos = (f"\n\nThis is part {i + 1} of {len(chunks)} of the transcript; continue the "
@@ -183,7 +185,7 @@ def make_sbobina(transcript, title="this lecture"):
                if len(chunks) > 1 else "")
         prompt = (
             f"You are writing up a lecture titled \"{title}\" from the raw transcript / "
-            f"notes below.{pos}\n\n{SBOBINA_RULES}\n\n--- SOURCE ---\n{ch}\n--- END SOURCE ---"
+            f"notes below.{pos}\n\n{SBOBINA_RULES}{extra}\n\n--- SOURCE ---\n{ch}\n--- END SOURCE ---"
         )
         parts.append(_call_llm(prompt, max_tokens=4000).strip())
     body = "\n\n".join(parts)
@@ -305,16 +307,18 @@ def make_guide(material, questions="", instructions="", title="this exam", mode=
     return body.strip()
 
 
-def make_cheatsheet(content, title="this subject"):
+def make_cheatsheet(content, title="this subject", instructions=""):
     """Condense a guide/sbobina into a dense one-page cheat sheet (markdown)."""
     content = content[:MAX_CTX_CHARS]
+    extra = (f"\nAlso follow these instructions from the student: {instructions.strip()}"
+             if (instructions or "").strip() else "")
     prompt = (
         f"Condense the material below into a DENSE one-page cheat sheet for \"{title}\" "
         "to review minutes before an exam. Markdown only. Rules: use ## for a few tight "
         "sections; under each, short '- ' bullets (fragments, not sentences); bold key "
         "terms; include a '## Numbers' section if any figures matter; include a "
         "'## Don't confuse' section for easily-mixed-up pairs; add mnemonics where useful. "
-        "Be ruthless — only the highest-yield facts. No preamble, no images.\n\n"
+        f"Be ruthless — only the highest-yield facts. No preamble, no images.{extra}\n\n"
         f"--- MATERIAL ---\n{content}\n--- END ---"
     )
     body = _call_llm(prompt, max_tokens=2500).strip()
@@ -452,11 +456,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"markdown": md})
             if route == "/api/sbobina":
                 md = make_sbobina(payload.get("transcript", ""),
-                                  payload.get("title", "this lecture"))
+                                  payload.get("title", "this lecture"),
+                                  payload.get("instructions", ""))
                 return self._send(200, {"markdown": md})
             if route == "/api/cheatsheet":
                 md = make_cheatsheet(payload.get("content", ""),
-                                     payload.get("title", "this subject"))
+                                     payload.get("title", "this subject"),
+                                     payload.get("instructions", ""))
                 return self._send(200, {"markdown": md})
             if route == "/api/image-search":
                 # image search needs no key; only the LLM routes do
