@@ -248,7 +248,22 @@ def _split_questions(text):
     return out
 
 
-def make_guide(material, questions="", instructions="", title="this exam", mode="auto"):
+def _concept_sections(material, title, extra, note=""):
+    """Build a full concept-driven guide from the material (chunked)."""
+    chunks = _chunk(material)
+    parts = []
+    for i, ch in enumerate(chunks):
+        pos = f" (part {i + 1} of {len(chunks)}; continue coherently)" if len(chunks) > 1 else ""
+        prompt = (
+            f'You are building a concept-driven study guide titled "{title}"{pos} from the '
+            f"lecture / reading material below.\n{GUIDE_CONCEPT_RULES}{note}{extra}\n\n"
+            f"--- MATERIAL ---\n{ch}\n--- END ---"
+        )
+        parts.append(_call_llm(prompt, max_tokens=4000).strip())
+    return "\n\n".join(p for p in parts if p)
+
+
+def make_guide(material, questions="", instructions="", title="this exam", mode="auto", partial=False):
     material = (material or "").strip()
     qlist = _split_questions(questions) if (questions or "").strip() else []
     exam = (mode == "exam") or (mode == "auto" and len(qlist) >= 1)
@@ -268,34 +283,38 @@ def make_guide(material, questions="", instructions="", title="this exam", mode=
                 f"--- QUESTIONS ---\n{numbered}\n--- END QUESTIONS ---"
             )
             parts.append(_call_llm(prompt, max_tokens=4000).strip())
-        # consolidated numbers + what's in the notes but wasn't asked
-        try:
-            asked = ", ".join(qlist)[:1500]
-            tail = (
-                f'From the course material below for "{title}", output exactly two markdown '
-                "sections and nothing else:\n"
-                "1) `## Numbers to have cold` — a table `| Item | Value |` of every threshold, "
-                "dose, cutoff or value worth memorising.\n"
-                "2) `## In the notes but not asked` — a bullet list of important points in the "
-                f"material NOT covered by these questions: {asked}\n\n"
-                f"--- MATERIAL ---\n{mat}\n--- END ---"
-            )
-            parts.append(_call_llm(tail, max_tokens=1500).strip())
-        except Exception:
-            pass
-        body = "\n\n".join(p for p in parts if p)
+        answered = "\n\n".join(p for p in parts if p)
+
+        if partial:
+            # The provided questions are only SOME of what's examinable: answer them,
+            # then ALSO build a full guide from the notes so nothing is missed.
+            note = ("\nNOTE: some real past questions have already been answered separately; "
+                    "still cover the entire material thoroughly here so the guide is complete, "
+                    "generating your own practice questions across all topics.")
+            full = _concept_sections(material, title, extra, note)
+            body = ("## Known past questions — answer these for sure\n\n"
+                    + answered
+                    + "\n\n## Full study guide — complete coverage of the notes\n\n"
+                    + full)
+        else:
+            # Treat the questions as the complete set: tight coverage + short appendix.
+            try:
+                asked = ", ".join(qlist)[:1500]
+                tail = (
+                    f'From the course material below for "{title}", output exactly two markdown '
+                    "sections and nothing else:\n"
+                    "1) `## Numbers to have cold` — a table `| Item | Value |` of every threshold, "
+                    "dose, cutoff or value worth memorising.\n"
+                    "2) `## In the notes but not asked` — a bullet list of important points in the "
+                    f"material NOT covered by these questions: {asked}\n\n"
+                    f"--- MATERIAL ---\n{mat}\n--- END ---"
+                )
+                answered += "\n\n" + _call_llm(tail, max_tokens=1500).strip()
+            except Exception:
+                pass
+            body = answered
     else:
-        chunks = _chunk(material)
-        parts = []
-        for i, ch in enumerate(chunks):
-            pos = f" (part {i + 1} of {len(chunks)}; continue coherently)" if len(chunks) > 1 else ""
-            prompt = (
-                f'You are building a concept-driven study guide titled "{title}"{pos} from the '
-                f"lecture / reading material below.\n{GUIDE_CONCEPT_RULES}{extra}\n\n"
-                f"--- MATERIAL ---\n{ch}\n--- END ---"
-            )
-            parts.append(_call_llm(prompt, max_tokens=4000).strip())
-        body = "\n\n".join(p for p in parts if p)
+        body = _concept_sections(material, title, extra)
 
     for fence in ("```markdown", "```md", "```"):
         if body.startswith(fence):
@@ -448,7 +467,7 @@ class Handler(BaseHTTPRequestHandler):
             if route == "/api/guide":
                 md = make_guide(payload.get("material", ""), payload.get("questions", ""),
                                 payload.get("instructions", ""), payload.get("title", "this exam"),
-                                payload.get("mode", "auto"))
+                                payload.get("mode", "auto"), bool(payload.get("partial", False)))
                 return self._send(200, {"markdown": md})
             if route == "/api/sbobina":
                 md = make_sbobina(payload.get("transcript", ""),

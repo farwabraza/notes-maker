@@ -308,8 +308,38 @@
     if (clean.length < 20) throw new Error("no-text");
     return clean;
   }
-  function fileField(id, accept) {
-    return `<label class="drop sm" id="${id}drop"><span class="dl">Drop file(s) or tap</span> <span class="tiny mut">— ${accept}</span><input type="file" id="${id}" accept="${accept}" multiple hidden></label>`;
+  const MAMMOTH_LIB = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.11.0/mammoth.browser.min.js";
+  let _mammothP;
+  function loadMammoth() {
+    if (window.mammoth) return Promise.resolve();
+    if (_mammothP) return _mammothP;
+    _mammothP = new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = MAMMOTH_LIB;
+      s.onload = () => (window.mammoth ? res() : rej(new Error("load")));
+      s.onerror = () => { _mammothP = null; rej(new Error("load")); };
+      document.head.appendChild(s);
+    });
+    return _mammothP;
+  }
+  async function extractDocx(file, prog) {
+    prog && prog("Reading Word doc…");
+    await loadMammoth();
+    const buf = await file.arrayBuffer();
+    const r = await window.mammoth.extractRawText({ arrayBuffer: buf });
+    const t = (r.value || "").trim();
+    if (t.length < 20) throw new Error("no-text");
+    return t;
+  }
+  // route a dropped/picked file to the right extractor (PDF, Word, or plain text)
+  async function extractFile(file, prog) {
+    const n = (file.name || "").toLowerCase();
+    if (n.endsWith(".pdf") || file.type === "application/pdf") return extractPdfText(file, prog);
+    if (n.endsWith(".docx") || (file.type || "").includes("wordprocessingml")) return extractDocx(file, prog);
+    if (n.endsWith(".doc")) throw new Error("legacy-doc");
+    return await file.text();
+  }
+  function fileField(id, accept) {    return `<label class="drop sm" id="${id}drop"><span class="dl">Drop file(s) or tap</span> <span class="tiny mut">— ${accept}</span><input type="file" id="${id}" accept="${accept}" multiple hidden></label>`;
   }
   function wireFile(id, ta) {
     const inp = $("#" + id), drop = $("#" + id + "drop"), dl = drop.querySelector(".dl");
@@ -320,11 +350,12 @@
       const list = Array.from(files || []);
       if (!list.length) return;
       for (const f of list) {
-        if (/\.pdf$/i.test(f.name) || f.type === "application/pdf") {
-          try { appendText(await extractPdfText(f, setDL)); }
-          catch (e) { toast(e.message === "no-text" ? "That PDF has no selectable text (scanned?) — paste it instead." : "Couldn't read that PDF — check your connection or paste the text."); }
-        } else {
-          try { appendText(await f.text()); } catch { toast("Couldn't read " + f.name + "."); }
+        try { appendText(await extractFile(f, setDL)); }
+        catch (e) {
+          const msg = e.message === "no-text" ? `“${f.name}” has no selectable text (scanned?) — paste it instead.`
+            : e.message === "legacy-doc" ? `Old .doc isn't supported — save “${f.name}” as .docx or PDF.`
+            : `Couldn't read “${f.name}” — check your connection or paste it instead.`;
+          toast(msg);
         }
       }
       setDL(`✓ Added ${list.length} — tap to add more`);
@@ -344,20 +375,24 @@
         <button data-m="import">I already have one</button>
       </div>
       <div id="gGen">
-        <textarea id="gMat" class="input ta" placeholder="Course material / lecture notes *  — paste, or drop PDF / text files below"></textarea>
-        ${fileField("gMatFile", ".pdf,.md,.txt")}
-        <textarea id="gQs" class="input ta" style="min-height:110px" placeholder="Past exam questions — one per line. Leave blank if there are none."></textarea>
-        <input id="gInstr" class="input" placeholder="Extra instructions (optional) — e.g. 'emphasise management', 'assume Italian oral exam'">
-        <div class="tiny mut">With questions → <b>exam-driven</b>: every question answered at depth (100% coverage). Without → <b>concept-driven</b>: built from your material with questions generated. Uses your key.</div>
+        <div class="flab">Course material / notes</div>
+        <textarea id="gMat" class="input ta" placeholder="Paste, or drop PDF / Word / text files below (you can drop several)"></textarea>
+        ${fileField("gMatFile", ".pdf,.docx,.md,.txt")}
+        <div class="flab">Past exam questions <span class="tiny mut">— optional</span></div>
+        <textarea id="gQs" class="input ta" style="min-height:96px" placeholder="Paste questions (one per line), or drop question PDFs / Word docs below. Leave blank if you have none."></textarea>
+        ${fileField("gQsFile", ".pdf,.docx,.md,.txt")}
+        <label class="chk"><input type="checkbox" id="gPartial"> These are only <b>some</b> of the questions — answer them, and also build a full guide from the notes</label>
+        <input id="gInstr" class="input" placeholder="Extra instructions (optional) — e.g. 'emphasise management', 'Italian oral exam'">
+        <div class="tiny mut">Full set of questions → exam-driven, 100% coverage. Tick “some” → answers those <i>and</i> builds a complete guide. None → built from notes with questions generated. Uses your key.</div>
       </div>
       <div id="gImp" hidden>
         <textarea id="gText" class="input ta" placeholder="Paste an already-structured guide (e.g. one built earlier)…"></textarea>
-        ${fileField("gImpFile", ".pdf,.md,.txt")}
+        ${fileField("gImpFile", ".pdf,.docx,.md,.txt")}
         <div class="tiny mut">Pure logic, no key needed — just parses a guide that's already written.</div>
       </div>
       <div class="btnrow end"><button class="btn ghost" id="mCancel">Cancel</button><button class="btn primary" id="mOk">Build</button></div>`);
     let gmode = "generate";
-    wireFile("gMatFile", "#gMat"); wireFile("gImpFile", "#gText");
+    wireFile("gMatFile", "#gMat"); wireFile("gQsFile", "#gQs"); wireFile("gImpFile", "#gText");
     $$("#gModeSeg button").forEach((b) => b.onclick = () => {
       gmode = b.dataset.m;
       $$("#gModeSeg button").forEach((x) => x.classList.toggle("on", x === b));
@@ -374,15 +409,19 @@
       } else {
         const material = $("#gMat").value;
         if (wordCount(material) < 40) return toast("Add your course material first.");
-        generateGuide(title, material, $("#gQs").value, $("#gInstr").value);
+        const partial = !!($("#gPartial") && $("#gPartial").checked);
+        generateGuide(title, material, $("#gQs").value, $("#gInstr").value, partial);
       }
     };
   }
-  async function generateGuide(title, material, questions, instructions) {
-    const exam = (questions || "").trim().length > 0;
-    modalBusy("Building your guide…", exam ? "Answering every past question at depth. Big guides make several calls and can take 1–2 min — keep this tab open." : "Building from your material and generating questions…");
+  async function generateGuide(title, material, questions, instructions, partial) {
+    const hasQ = (questions || "").trim().length > 0;
+    const sub = !hasQ ? "Building from your material and generating questions…"
+      : partial ? "Answering your questions AND building a full guide from the notes — several calls, ~1–2 min. Keep this tab open."
+      : "Answering every past question at depth. Big guides make several calls and can take 1–2 min — keep this tab open.";
+    modalBusy("Building your guide…", sub);
     try {
-      const { markdown } = await api("/api/guide", { material, questions, instructions, title });
+      const { markdown } = await api("/api/guide", { material, questions, instructions, title, partial });
       const model = E.buildModel(markdown, { title });
       const id = uid("g_");
       subj().items[id] = { id, type: "guide", title: model.meta.title || title, createdAt: Date.now(), model, sr: {}, raw: markdown };
@@ -402,7 +441,7 @@
         <input id="sbAuthor" class="input" placeholder="Author (you)">
       </div>
       <textarea id="sbText" class="input ta" placeholder="Paste the transcript, or drop a PDF / VTT / text file below…"></textarea>
-      ${fileField("sbFile", ".pdf,.txt,.md,.vtt,.srt")}
+      ${fileField("sbFile", ".pdf,.docx,.txt,.md,.vtt,.srt")}
       <div class="tiny mut">Needs the server + an API key. Long transcripts are chunked automatically. Figures are open-licensed (Wikimedia / Openverse).</div>
       <div class="btnrow end"><button class="btn ghost" id="mCancel">Cancel</button><button class="btn primary" id="mOk">Generate</button></div>`);
     wireFile("sbFile", "#sbText");
