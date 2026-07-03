@@ -459,12 +459,16 @@
     const opts = src.map((i) => `<option value="${i.id}">${esc(i.title)} (${i.type})</option>`).join("");
     openModal(`<h3 class="mtitle">New cheat sheet</h3>
       <input id="csTitle" class="input" placeholder="Cheat sheet title *">
-      ${src.length ? `<div class="tiny mut" style="margin-bottom:4px">Condense an existing item:</div><select id="csSrc" class="input">${opts}<option value="__paste">— paste my own text —</option></select>` : `<input type="hidden" id="csSrc" value="__paste">`}
-      <textarea id="csText" class="input ta" placeholder="Or paste material to condense…" ${src.length ? "hidden" : ""}></textarea>
+      ${src.length ? `<div class="tiny mut" style="margin-bottom:4px">Condense an existing item:</div><select id="csSrc" class="input">${opts}<option value="__paste">— paste / upload my own —</option></select>` : `<input type="hidden" id="csSrc" value="__paste">`}
+      <div id="csPasteWrap" ${src.length ? 'hidden' : ''}>
+        <textarea id="csText" class="input ta" placeholder="Paste material to condense, or drop PDF / Word / text files below…"></textarea>
+        ${fileField("csFile", ".pdf,.docx,.md,.txt")}
+      </div>
       <div class="tiny mut">Needs the server + an API key. Produces a dense one-pager.</div>
       <div class="btnrow end"><button class="btn ghost" id="mCancel">Cancel</button><button class="btn primary" id="mOk">Generate</button></div>`);
-    const sel = $("#csSrc"), ta = $("#csText");
-    if (sel && sel.tagName === "SELECT") sel.onchange = () => { ta.hidden = sel.value !== "__paste"; };
+    const sel = $("#csSrc"), ta = $("#csText"), wrap = $("#csPasteWrap");
+    wireFile("csFile", "#csText");
+    if (sel && sel.tagName === "SELECT") sel.onchange = () => { wrap.hidden = sel.value !== "__paste"; };
     $("#mCancel").onclick = closeModal;
     $("#mOk").onclick = () => {
       const title = $("#csTitle").value.trim(); if (!title) return toast("Give it a title.");
