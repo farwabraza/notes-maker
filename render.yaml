@@ -11,10 +11,6 @@ services:
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
-      # Unbuffered stdout so the startup message and errors show up in Render's
-      # log stream immediately (a buffered pipe otherwise swallows them).
-      - key: PYTHONUNBUFFERED
-        value: "1"
       # Change PROVIDER/MODEL to match your key (see the table in README).
       - key: PROVIDER
         value: anthropic

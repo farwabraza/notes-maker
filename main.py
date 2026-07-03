@@ -137,34 +137,25 @@ def enrich(topic, mode, title):
 #  Sbobina maker — turn a raw transcript / rough notes into a clean, readable
 #  written-up lecture (Italian-university "sbobina" style) with figure slots.
 # ============================================================================
-# Structure distilled from the user's own sbobina template (a real Medical-Psychology
-# lecture write-up): continuous academic prose, the lecturer's own framing, named
-# studies/authors kept, enumerations as bullets, definitions as blockquotes, sparse figures.
 SBOBINA_RULES = (
-    "Write a clean written-up lecture (an Italian-university 'sbobina') from the raw "
-    "transcript/notes: faithful to what was said, well organised, and readable on its own "
-    "as continuous ACADEMIC PROSE — full flowing paragraphs, not bullet-point dumps.\n"
-    "STRUCTURE (match this template):\n"
-    "- Keep the lecturer's own framing and voice. Preserve every named study, author, "
-    "paper or model mentioned in the source (e.g. 'Sturmberg's paper defines…', "
-    "'Funderburk and colleagues treat the relationship as a complex system') — attribute "
-    "them exactly as the lecture does; never drop or invent an attribution.\n"
-    "- Use ## for each section heading, phrased the way the lecturer frames the topic — "
-    "often as a question (e.g. '## How does the urban environment affect mental health?').\n"
-    "- Explain in paragraphs that develop the argument step by step. Use '- ' bullet lists "
-    "ONLY for genuine enumerations the lecture actually lists (levels of organisation, "
-    "categories of factors, timescales, criteria, steps).\n"
-    "- Use '> ' blockquotes for the key definitions and the load-bearing take-home lines.\n"
-    "- Bold the truly key terms with **term** on first use.\n"
-    "- Where a figure would genuinely help (an anatomical structure, a concept diagram, a "
-    "chart), insert on ITS OWN LINE a figure slot exactly like:\n"
+    "Write in clear, flowing academic prose — full paragraphs, not bullet dumps. "
+    "This is a written-up lecture (an Italian-university 'sbobina'): faithful to the "
+    "material, well organised, readable on its own.\n"
+    "FORMAT (markdown):\n"
+    "- Use ## for each section heading. Phrase headings the way the lecturer frames "
+    "them (often as a question, e.g. '## How does the urban environment affect mental health?').\n"
+    "- Explain in paragraphs. Use '- ' bullet lists ONLY for genuine enumerations "
+    "(levels, criteria, steps).\n"
+    "- Use '> ' blockquotes for key definitions.\n"
+    "- Bold the truly key terms with **term**.\n"
+    "- Where a figure would genuinely help the reader (an anatomical structure, a "
+    "concept diagram, a chart), insert on ITS OWN LINE a figure slot exactly like:\n"
     "  {{IMG: concise visual search query | descriptive figure caption}}\n"
-    "  At most one per section, only when it truly aids understanding. Prefer generic "
-    "anatomy/concept queries (e.g. 'amygdala brain anatomy', 'normal distribution vs power "
-    "law') that open-licensed libraries will have.\n"
-    "Do NOT invent facts, citations, or data not present in the source. Do NOT add a title "
-    "header, date, professor or author line — the app adds those from the metadata; output "
-    "only the body sections."
+    "  Use at most one figure slot per section, and only when it truly aids understanding. "
+    "Prefer generic anatomy/concept queries (e.g. 'amygdala brain anatomy', "
+    "'normal distribution vs power law') that open-licensed libraries will have.\n"
+    "Do NOT invent facts, citations, or data not present in the source. Do not add a "
+    "title header or author line — only the body sections."
 )
 
 
@@ -182,11 +173,9 @@ def _chunk(text, size=11000):
     return chunks or [text]
 
 
-def make_sbobina(transcript, title="this lecture", instructions=""):
+def make_sbobina(transcript, title="this lecture"):
     """Return markdown body (with {{IMG:...}} slots). Chunks long transcripts."""
     chunks = _chunk(transcript)
-    extra = (f"\nAlso follow these instructions from the student: {instructions.strip()}"
-             if (instructions or "").strip() else "")
     parts = []
     for i, ch in enumerate(chunks):
         pos = (f"\n\nThis is part {i + 1} of {len(chunks)} of the transcript; continue the "
@@ -194,7 +183,7 @@ def make_sbobina(transcript, title="this lecture", instructions=""):
                if len(chunks) > 1 else "")
         prompt = (
             f"You are writing up a lecture titled \"{title}\" from the raw transcript / "
-            f"notes below.{pos}\n\n{SBOBINA_RULES}{extra}\n\n--- SOURCE ---\n{ch}\n--- END SOURCE ---"
+            f"notes below.{pos}\n\n{SBOBINA_RULES}\n\n--- SOURCE ---\n{ch}\n--- END SOURCE ---"
         )
         parts.append(_call_llm(prompt, max_tokens=4000).strip())
     body = "\n\n".join(parts)
@@ -220,51 +209,28 @@ def make_sbobina(transcript, title="this lecture", instructions=""):
 # sbobine) or batched by question (exam guides); this only bounds one API call.
 MAX_CTX_CHARS = 300000
 
-# Exam-driven structure distilled from the user's Nephrology oral-exam master guide:
-# one section per real question, each answered on a fixed depth arc that survives follow-ups.
 GUIDE_EXAM_RULES = (
-    "Output GitHub-flavoured markdown. This is a 100%-coverage ORAL-EXAM guide: every "
-    "answer must be deep enough to survive an examiner's follow-up questions.\n"
-    "For EACH question, write exactly:\n"
+    "Output GitHub-flavoured markdown. For EACH question, write:\n"
     "  `## <a short topic title for this question>`\n"
     "  `**Q<n>: <the full question text>?**`   (keep the given Q number)\n"
-    "  then a thorough, exam-ready answer.\n"
-    "Build each answer on this depth arc, naming the beats in **bold** and adapting to the "
-    "subject — for clinical/mechanism questions: **What it is → Why it happens → What you "
-    "see → Diagnosis → Treatment**; for non-clinical questions use the equivalent logical "
-    "arc (definition → mechanism/derivation → examples/consequences → how it's applied). "
-    "Explain causal CHAINS step by step (A → B → C) rather than listing bare facts.\n"
-    "Surface these cues on their OWN lines where they apply:\n"
-    "  `> ` blockquote for the crisp, memorise-word-for-word definition;\n"
-    "  🧠 for a MEMORY TRICK / mnemonic — always spell the acronym out in full;\n"
-    "  ⭐ for the single line an examiner most wants to hear;\n"
-    "  🔑 for a must-state fact or 'build the chain, don't memorise a list' cue;\n"
-    "  🚩 for each exam trap; and state every key threshold / dose / cut-off / value "
-    "EXPLICITLY. Use `| Item | Value |` (or `| Stage | … |`) tables for staging, "
-    "classification and comparison.\n"
+    "  then a thorough, exam-ready answer that a strict examiner would accept in full.\n"
+    "Within the answer, surface cues on their own lines where they apply:\n"
+    "  `> ` blockquote for a crisp definition;  a line starting 🚩 for each exam trap;\n"
+    "  🧠 for a mnemonic / memory hook;  ⭐ for the single most important line;\n"
+    "  🔑 for a must-state fact;  and state key thresholds / doses / values explicitly.\n"
     "Answer from the MATERIAL; add only standard, uncontroversial knowledge where the "
     "material is silent, and never contradict it. Be exhaustive — do not skip or merge "
-    "questions. 100% coverage of the questions given."
+    "questions. This must be 100% coverage of the questions given."
 )
-# Concept-driven structure distilled from the user's Neuropsychology master guide:
-# an exam-framing opener, topic sections with definition + hooks + MCQs, then a rapid-fire bank.
 GUIDE_CONCEPT_RULES = (
-    "There are no past questions, so build the guide from the material itself as an "
-    "exam-focused study guide. Output GitHub-flavoured markdown:\n"
-    "  - Open with `## How they examine you` — 2-4 bullets on what this material tends to "
-    "be tested on (definitions, contrasts, localisation, etc.), if the material gives any "
-    "signal; otherwise omit.\n"
-    "  - Break the material into topics, each as `## <topic>`. Mark the highest-yield "
-    "topics with a 🔥 on the heading line.\n"
-    "  - Under each topic: a `> ` one-line definition, then the key explanation in tight "
-    "prose; use `| | |` tables for genuine contrasts (e.g. Broca's vs Wernicke's); add 🧠 "
-    "mnemonics (acronym spelled out), ⭐ for the key line and 🔑 for must-state facts where "
-    "useful; state numbers/thresholds explicitly.\n"
+    "There are no past questions, so build the guide from the material itself. Output "
+    "GitHub-flavoured markdown:\n"
+    "  - Break the material into topics, each as `## <topic>`.\n"
+    "  - Under each: a `> ` one-line definition, then the key explanation in tight prose; "
+    "add 🧠 mnemonics where useful; mark the highest-yield topics with a 🔥 on the heading line.\n"
     "  - After each major topic add a short `Practice:` line of 1-2 situational questions a "
-    "professor might ask, each as `- Q: <question>? — A: <concise model answer>` (plain "
-    "list items, NOT bold headings).\n"
-    "  - End with a `## Rapid-fire MCQ bank` — a numbered list of one-line question → "
-    "answer pairs covering the whole guide.\n"
+    "professor might ask, each written as `- Q: <question>? — A: <concise model answer>` "
+    "(plain list items, NOT bold headings).\n"
     "  - Cover the whole material; don't drop sections."
 )
 
@@ -321,24 +287,11 @@ def make_guide(material, questions="", instructions="", title="this exam", mode=
     else:
         chunks = _chunk(material)
         parts = []
-        n = len(chunks)
         for i, ch in enumerate(chunks):
-            pos = f" (part {i + 1} of {n}; continue coherently)" if n > 1 else ""
-            # opener only on the first chunk, rapid-fire bank only on the last —
-            # so multi-chunk guides don't repeat those sections
-            rules = GUIDE_CONCEPT_RULES
-            if n > 1 and i > 0:
-                rules = rules.replace(
-                    "  - Open with `## How they examine you` — 2-4 bullets on what this material tends to "
-                    "be tested on (definitions, contrasts, localisation, etc.), if the material gives any "
-                    "signal; otherwise omit.\n", "")
-            if n > 1 and i < n - 1:
-                rules = rules.replace(
-                    "  - End with a `## Rapid-fire MCQ bank` — a numbered list of one-line question → "
-                    "answer pairs covering the whole guide.\n", "")
+            pos = f" (part {i + 1} of {len(chunks)}; continue coherently)" if len(chunks) > 1 else ""
             prompt = (
                 f'You are building a concept-driven study guide titled "{title}"{pos} from the '
-                f"lecture / reading material below.\n{rules}{extra}\n\n"
+                f"lecture / reading material below.\n{GUIDE_CONCEPT_RULES}{extra}\n\n"
                 f"--- MATERIAL ---\n{ch}\n--- END ---"
             )
             parts.append(_call_llm(prompt, max_tokens=4000).strip())
@@ -352,18 +305,16 @@ def make_guide(material, questions="", instructions="", title="this exam", mode=
     return body.strip()
 
 
-def make_cheatsheet(content, title="this subject", instructions=""):
+def make_cheatsheet(content, title="this subject"):
     """Condense a guide/sbobina into a dense one-page cheat sheet (markdown)."""
     content = content[:MAX_CTX_CHARS]
-    extra = (f"\nAlso follow these instructions from the student: {instructions.strip()}"
-             if (instructions or "").strip() else "")
     prompt = (
         f"Condense the material below into a DENSE one-page cheat sheet for \"{title}\" "
         "to review minutes before an exam. Markdown only. Rules: use ## for a few tight "
         "sections; under each, short '- ' bullets (fragments, not sentences); bold key "
         "terms; include a '## Numbers' section if any figures matter; include a "
         "'## Don't confuse' section for easily-mixed-up pairs; add mnemonics where useful. "
-        f"Be ruthless — only the highest-yield facts. No preamble, no images.{extra}\n\n"
+        "Be ruthless — only the highest-yield facts. No preamble, no images.\n\n"
         f"--- MATERIAL ---\n{content}\n--- END ---"
     )
     body = _call_llm(prompt, max_tokens=2500).strip()
@@ -501,13 +452,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"markdown": md})
             if route == "/api/sbobina":
                 md = make_sbobina(payload.get("transcript", ""),
-                                  payload.get("title", "this lecture"),
-                                  payload.get("instructions", ""))
+                                  payload.get("title", "this lecture"))
                 return self._send(200, {"markdown": md})
             if route == "/api/cheatsheet":
                 md = make_cheatsheet(payload.get("content", ""),
-                                     payload.get("title", "this subject"),
-                                     payload.get("instructions", ""))
+                                     payload.get("title", "this subject"))
                 return self._send(200, {"markdown": md})
             if route == "/api/image-search":
                 # image search needs no key; only the LLM routes do
@@ -520,25 +469,10 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send(500, {"error": f"{type(e).__name__}: {e}"})
 
-    def do_HEAD(self):
-        # Uptime monitors and some proxies probe with HEAD; answer like GET
-        # for the health route, minimal 200 elsewhere.
-        if self.path.split("?")[0] == "/api/health":
-            body = json.dumps({"ok": True}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-        else:
-            self.send_response(200)
-            self.end_headers()
-
     def do_GET(self):
         path = self.path.split("?")[0]
         if path in ("/", ""):
             path = "/index.html"
-        if path == "/favicon.ico":
-            path = "/icon-192.png"
         if path == "/api/health":
             return self._send(200, {"ok": True, "enrichment": bool(API_KEY),
                                      "provider": PROVIDER, "model": MODEL})
@@ -559,9 +493,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"  Ward running →  http://0.0.0.0:{PORT}", flush=True)
+    print(f"  Ward running →  http://0.0.0.0:{PORT}")
     if API_KEY:
-        print(f"  Enrichment: ON  (provider={PROVIDER}, model={MODEL})", flush=True)
+        print(f"  Enrichment: ON  (provider={PROVIDER}, model={MODEL})")
     else:
-        print("  Enrichment: off  (set API_KEY + PROVIDER to enable — see README)", flush=True)
+        print("  Enrichment: off  (set API_KEY + PROVIDER to enable — see README)")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
